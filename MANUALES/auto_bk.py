@@ -718,7 +718,7 @@ def main():
         st.markdown("""
         <div class="upload-zone">
             <h3>📦 Cuadro de Clientes / Pedidos</h3>
-            <p>Excel con columnas: Nombre 1, Distrito, Suma de Palets, etc.</p>
+            <p>Excel con columnas: Solic#, Nombre 1, ST, Prepago, Distrito, ZV, Doc#venta...</p>
         </div>
         """, unsafe_allow_html=True)
         file_orders = st.file_uploader(
@@ -757,9 +757,9 @@ def main():
             | BK3701 | SAN JUAN DE LURIGANCHO | CORP. BREXIMAR | 6004091 | PEBXG-761 | 1008 | MERCEDES | T77 | 10716 | DISPONIBLE | |
 
             **Archivo de Clientes / Pedidos** debe contener:
-            | Solic# | Nombre 1 | ST | Prepago | Distrito | ZV | Cpag | Doc#venta | Denominación | Suma de Cantidad de pedido | Suma de Palets |
-            |--------|----------|-----|---------|----------|------|------|-----------|--------------|---------------------------|----------------|
-            | 14324063 | Distribuidora ABC | 01 | NO PREPAGO | LIMA | PEM786 | CP01 | 7655454725 | Cerveza | 1008 | 12.0 |
+            | Solic# | Nombre 1 | ST | Prepago | Distrito | ZV | Doc#venta | Denominación | Suma de Cantidad de pedido | Suma de Palets |
+            |--------|----------|-----|---------|----------|------|-----------|--------------|---------------------------|----------------|
+            | 14324063 | Distribuidora ABC | 01 | NO PREPAGO | LIMA | PEM786 | 7655454725 | Cerveza | 1008 | 12.0 |
             """)
 
             st.markdown("**Capacidades configuradas:**")
