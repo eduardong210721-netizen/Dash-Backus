@@ -30,7 +30,7 @@ CAPACITY_PRIORITY = [1008, 672, 360, 200, 105]
 
 # Expected columns for validation
 TRUCK_REQUIRED_COLS = ["RUTA", "ZONAS", "Capac.", "Status"]
-ORDER_REQUIRED_COLS = ["Nombre 1", "Distrito", "Suma de Palets"]
+ORDER_REQUIRED_COLS = ["Solic#", "Nombre 1", "ST", "Prepago", "Latitud", "Longitud", "Distrito", "ZV", "Doc#venta", "Suma de Cantidad de pedido", "Suma de Palets"]
 
 
 # ─────────────────────── STYLES ───────────────────────
@@ -326,14 +326,14 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     special_clients = special_clients or SPECIAL_CLIENTS
     priority_rules = priority_rules or []
 
-    # Build truck pool
     truck_pool = {}
     for _, row in df_trucks_avail.iterrows():
         truck_pool[row["RUTA"]] = {
             "cap": row["Capac."],
             "pallet_cap": row["Palets_Cap"],
             "zone": str(row["ZONAS"]).strip(),
-            "trips": {},
+            "trips_pallets": {},
+            "trips_locations": {},
             "max_trips": MAX_TRIPS,
         }
 
@@ -351,78 +351,89 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
         """Find best truck for this order and assign it."""
         pallets = result.loc[idx, "Suma de Palets"]
         zone = str(result.loc[idx, "Distrito"]).strip()
+        
+        lat = pd.to_numeric(result.loc[idx, "Latitud"], errors="coerce") if "Latitud" in result.columns else float('nan')
+        lon = pd.to_numeric(result.loc[idx, "Longitud"], errors="coerce") if "Longitud" in result.columns else float('nan')
+        has_loc = not (pd.isna(lat) or pd.isna(lon))
 
-        candidates = []
-
-        if forced_bk and forced_bk in truck_pool:
-            candidates = [forced_bk]
-        else:
-            all_bks = list(truck_pool.keys())
-
-            def score_bk(bk):
-                info = truck_pool[bk]
-                cap_idx = CAPACITY_PRIORITY.index(info["cap"]) if info["cap"] in CAPACITY_PRIORITY else 99
-                zone_match = 0
-                if zone:
-                    bk_zone = info["zone"].lower()
-                    if zone.lower() in bk_zone or any(
-                        z in bk_zone for z in zone.lower().split()
-                    ):
-                        zone_match = -1
-                has_open = -1 if any(v > pallets - 0.01 for v in info["trips"].values()) else 0
-                return (has_open, cap_idx, zone_match, bk)
-
-            all_bks.sort(key=score_bk)
-            candidates = all_bks
-
-        # If forced_trip is specified, try to assign to that specific trip
-        if forced_trip is not None:
-            for bk in candidates:
-                info = truck_pool[bk]
-                if forced_trip in info["trips"]:
-                    if info["trips"][forced_trip] >= pallets - 0.01:
-                        info["trips"][forced_trip] -= pallets
-                        result.loc[idx, "RUTA"] = bk
-                        result.loc[idx, "VIAJE"] = forced_trip
-                        return True
-                elif forced_trip <= info["max_trips"]:
-                    # trip not yet opened, check if we can skip
-                    # open all trips up to forced_trip if needed
-                    for t in range(1, forced_trip + 1):
-                        if t not in info["trips"]:
-                            info["trips"][t] = info["pallet_cap"]
-                    info["trips"][forced_trip] -= pallets
-                    result.loc[idx, "RUTA"] = bk
-                    result.loc[idx, "VIAJE"] = forced_trip
-                    return True
-
-        for bk in candidates:
-            info = truck_pool[bk]
-
-            for t in sorted(info["trips"].keys()):
-                if info["trips"][t] >= pallets - 0.01:
-                    info["trips"][t] -= pallets
-                    result.loc[idx, "RUTA"] = bk
-                    result.loc[idx, "VIAJE"] = t
-                    return True
-
-            next_trip = max(info["trips"].keys(), default=0) + 1
+        slots = []
+        for bk, info in truck_pool.items():
+            if forced_bk and bk != forced_bk:
+                continue
+                
+            cap_idx = CAPACITY_PRIORITY.index(info["cap"]) if info["cap"] in CAPACITY_PRIORITY else 99
+            bk_zone = info["zone"].lower()
+            zone_match = -1 if (zone and (zone.lower() in bk_zone or any(z in bk_zone for z in zone.lower().split()))) else 0
+            
+            # 1. Existing trips
+            for t, rem_pallets in info["trips_pallets"].items():
+                if forced_trip and t != forced_trip:
+                    continue
+                if rem_pallets >= pallets - 0.01:
+                    dist = 0
+                    if has_loc and len(info["trips_locations"][t]) > 0:
+                        locs = info["trips_locations"][t]
+                        c_lat = sum(p[0] for p in locs) / len(locs)
+                        c_lon = sum(p[1] for p in locs) / len(locs)
+                        dist = math.sqrt((lat - c_lat)**2 + (lon - c_lon)**2)
+                    slots.append((dist, 0, cap_idx, zone_match, bk, t, False))
+                    
+            # 2. Potential new trip
+            next_trip = max(info["trips_pallets"].keys(), default=0) + 1
             if next_trip <= info["max_trips"] and info["pallet_cap"] >= pallets - 0.01:
-                info["trips"][next_trip] = info["pallet_cap"] - pallets
-                result.loc[idx, "RUTA"] = bk
-                result.loc[idx, "VIAJE"] = next_trip
-                return True
-
-        # Fallback for oversized orders
-        for bk in candidates:
-            info = truck_pool[bk]
-            next_trip = max(info["trips"].keys(), default=0) + 1
+                if forced_trip and forced_trip != next_trip:
+                    if forced_trip <= info["max_trips"]:
+                        slots.append((0.05 if has_loc else 0.001, 1, cap_idx, zone_match, bk, forced_trip, True))
+                else:
+                    dist_penalty = 0.03 if has_loc else 0.001
+                    slots.append((dist_penalty, 1, cap_idx, zone_match, bk, next_trip, True))
+                    
+        slots.sort()
+        
+        if slots:
+            best_slot = slots[0]
+            _, _, _, _, best_bk, best_trip, is_new = best_slot
+            info = truck_pool[best_bk]
+            
+            if is_new:
+                for t in range(1, best_trip + 1):
+                    if t not in info["trips_pallets"]:
+                        info["trips_pallets"][t] = info["pallet_cap"]
+                        info["trips_locations"][t] = []
+            
+            info["trips_pallets"][best_trip] -= pallets
+            if has_loc:
+                info["trips_locations"][best_trip].append((lat, lon))
+            
+            result.loc[idx, "RUTA"] = best_bk
+            result.loc[idx, "VIAJE"] = best_trip
+            return True
+            
+        # Fallback for oversized orders or when all trucks are full
+        fallback_slots = []
+        for bk, info in truck_pool.items():
+            if forced_bk and bk != forced_bk:
+                continue
+            cap_idx = CAPACITY_PRIORITY.index(info["cap"]) if info["cap"] in CAPACITY_PRIORITY else 99
+            next_trip = forced_trip if forced_trip else max(info["trips_pallets"].keys(), default=0) + 1
             if next_trip <= info["max_trips"]:
-                info["trips"][next_trip] = 0
-                result.loc[idx, "RUTA"] = bk
-                result.loc[idx, "VIAJE"] = next_trip
-                return True
-
+                fallback_slots.append((cap_idx, bk, next_trip))
+                
+        fallback_slots.sort()
+        if fallback_slots:
+            _, best_bk, best_trip = fallback_slots[0]
+            info = truck_pool[best_bk]
+            for t in range(1, best_trip + 1):
+                if t not in info["trips_pallets"]:
+                    info["trips_pallets"][t] = 0
+                    info["trips_locations"][t] = []
+            info["trips_pallets"][best_trip] = 0
+            if has_loc:
+                info["trips_locations"][best_trip].append((lat, lon))
+            result.loc[idx, "RUTA"] = best_bk
+            result.loc[idx, "VIAJE"] = best_trip
+            return True
+            
         result.loc[idx, "RUTA"] = "SIN ASIGNAR"
         result.loc[idx, "VIAJE"] = 1
         return False
@@ -489,7 +500,7 @@ def generate_excel_per_bk(df_result, truck_pool):
         for bk_name in bk_names:
             bk_data = df_result[df_result["RUTA"] == bk_name]
             info = truck_pool.get(bk_name, {})
-            total_trip_count = len(info.get("trips", {}))
+            total_trip_count = len(info.get("trips_pallets", {}))
             total_pallets = bk_data["Suma de Palets"].sum()
             max_capacity = info.get("pallet_cap", 0) * total_trip_count
             utilization = (total_pallets / max_capacity * 100) if max_capacity > 0 else 0
@@ -548,7 +559,7 @@ def render_bk_card(bk_name, bk_data, truck_pool):
 
     if bk_name in truck_pool:
         info = truck_pool[bk_name]
-        total_trip_count = len(info["trips"])
+        total_trip_count = len(info["trips_pallets"])
         max_capacity = info["pallet_cap"] * total_trip_count
         utilization = (total_pallets / max_capacity * 100) if max_capacity > 0 else 0
         cap_label = f"{int(info['cap'])} cajas / {info['pallet_cap']} palets"
@@ -869,7 +880,7 @@ def main():
     total_trips = 0
     total_capacity = 0
     for bk_name, info in truck_pool.items():
-        trip_count = len(info["trips"])
+        trip_count = len(info["trips_pallets"])
         if trip_count > 0:
             total_trips += trip_count
             total_capacity += info["pallet_cap"] * trip_count
