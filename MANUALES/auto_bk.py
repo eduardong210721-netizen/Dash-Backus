@@ -323,20 +323,24 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
         - client_substr: substring to match client name
         - forced_bk: BK name to force (optional)
         - forced_trip: trip number to force (optional, 1/2/3)
+        
+    custom_max_trips: dict mapping bk_name -> max trips integer
     """
     rng = random.Random(seed)
     special_clients = special_clients or SPECIAL_CLIENTS
     priority_rules = priority_rules or []
+    custom_max_trips = custom_max_trips or {}
 
     truck_pool = {}
     for _, row in df_trucks_avail.iterrows():
-        truck_pool[row["RUTA"]] = {
+        bk_name = row["RUTA"]
+        truck_pool[bk_name] = {
             "cap": row["Capac."],
             "pallet_cap": row["Palets_Cap"],
             "zone": str(row["ZONAS"]).strip(),
             "trips_pallets": {},
             "trips_locations": {},
-            "max_trips": MAX_TRIPS,
+            "max_trips": custom_max_trips.get(bk_name, MAX_TRIPS),
         }
 
     result = df_orders.copy()
@@ -641,6 +645,43 @@ def render_daily_conditions(df_trucks, df_orders):
     st.session_state.excluded_bks = excluded
 
     st.markdown("---")
+    
+    # ── Configurable Max Trips per BK ──
+    st.markdown("##### 🔄 Viajes máximos por BK")
+    st.caption("Ajusta cuántos viajes puede dar cada camión hoy")
+    
+    if "custom_max_trips" not in st.session_state:
+        st.session_state.custom_max_trips = {}
+        
+    with st.expander("⚙️ Configurar viajes por camión", expanded=False):
+        # Allow searching/filtering the list
+        search_bk = st.text_input("Buscar camión", key="search_bk_trips")
+        
+        for bk in all_bks:
+            if search_bk and search_bk.lower() not in bk.lower():
+                continue
+                
+            col_b, col_t = st.columns([2, 1])
+            with col_b:
+                st.write(f"🚚 {bk}")
+            with col_t:
+                current_val = st.session_state.custom_max_trips.get(bk, MAX_TRIPS)
+                new_val = st.number_input(
+                    "Viajes", 
+                    min_value=1, 
+                    max_value=5, 
+                    value=current_val, 
+                    key=f"trip_limit_{bk}",
+                    label_visibility="collapsed"
+                )
+                if new_val != current_val:
+                    if new_val == MAX_TRIPS:
+                        if bk in st.session_state.custom_max_trips:
+                            del st.session_state.custom_max_trips[bk]
+                    else:
+                        st.session_state.custom_max_trips[bk] = new_val
+                        
+    st.markdown("---")
 
     # ── Priority rules ──
     st.markdown("##### ⭐ Prioridades de clientes")
@@ -703,7 +744,7 @@ def render_daily_conditions(df_trucks, df_orders):
             else:
                 st.warning("Selecciona un cliente")
 
-    return set(excluded), st.session_state.priority_rules
+    return set(excluded), st.session_state.priority_rules, st.session_state.custom_max_trips
 
 
 # ─────────────────────── MAIN APP ───────────────────────
@@ -844,7 +885,7 @@ def main():
         st.markdown("---")
 
         # ── DAILY CONDITIONS ──
-        excluded_bks, priority_rules = render_daily_conditions(df_trucks, df_orders)
+        excluded_bks, priority_rules, custom_max_trips = render_daily_conditions(df_trucks, df_orders)
 
         st.markdown("---")
         st.markdown("#### 📦 Capacidades")
@@ -881,6 +922,7 @@ def main():
         df_orders, df_trucks_avail,
         seed=st.session_state.seed,
         priority_rules=priority_rules,
+        custom_max_trips=custom_max_trips,
     )
 
     # ─── KPIs ───
