@@ -315,7 +315,7 @@ def get_available_trucks(df_trucks, excluded_bks=None):
 
 # ─────────────────────── ASSIGNMENT ALGORITHM ───────────────────────
 def assign_trucks(df_orders, df_trucks_avail, seed=42,
-                  special_clients=None, priority_rules=None):
+                  special_clients=None, priority_rules=None, custom_max_trips=None):
     """
     Assign trucks (BK) to orders based on pallet requirements.
 
