@@ -362,10 +362,15 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     # if seed != 42:
     #     rng.shuffle(order_indices)
 
+    client_assigned_bk = {}
+
     def find_and_assign(idx, forced_bk=None, forced_trip=None):
         """Find best truck for this order and assign it."""
         pallets = result.loc[idx, "Suma de Palets"]
         zone = str(result.loc[idx, "Distrito"]).strip()
+        client_name = str(result.loc[idx, "Nombre 1"])
+        
+        preferred_bk = forced_bk or client_assigned_bk.get(client_name)
         
         lat = pd.to_numeric(result.loc[idx, "Latitud"], errors="coerce") if "Latitud" in result.columns else float('nan')
         lon = pd.to_numeric(result.loc[idx, "Longitud"], errors="coerce") if "Longitud" in result.columns else float('nan')
@@ -380,6 +385,8 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
             bk_zone = info["zone"].lower()
             zone_match = -1 if (zone and (zone.lower() in bk_zone or any(z in bk_zone for z in zone.lower().split()))) else 0
             
+            is_preferred = -1 if (preferred_bk and bk == preferred_bk) else 0
+            
             # 1. Existing trips
             for t, rem_pallets in info["trips_pallets"].items():
                 if forced_trip and t != forced_trip:
@@ -391,23 +398,23 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
                         c_lat = sum(p[0] for p in locs) / len(locs)
                         c_lon = sum(p[1] for p in locs) / len(locs)
                         dist = math.sqrt((lat - c_lat)**2 + (lon - c_lon)**2)
-                    slots.append((dist, 0, cap_idx, zone_match, bk, t, False))
+                    slots.append((is_preferred, dist, 0, cap_idx, zone_match, bk, t, False))
                     
             # 2. Potential new trip
             next_trip = max(info["trips_pallets"].keys(), default=0) + 1
             if next_trip <= info["max_trips"] and info["pallet_cap"] >= pallets - 0.01:
                 if forced_trip and forced_trip != next_trip:
                     if forced_trip <= info["max_trips"]:
-                        slots.append((0.05 if has_loc else 0.001, 1, cap_idx, zone_match, bk, forced_trip, True))
+                        slots.append((is_preferred, 0.05 if has_loc else 0.001, 1, cap_idx, zone_match, bk, forced_trip, True))
                 else:
                     dist_penalty = 0.03 if has_loc else 0.001
-                    slots.append((dist_penalty, 1, cap_idx, zone_match, bk, next_trip, True))
+                    slots.append((is_preferred, dist_penalty, 1, cap_idx, zone_match, bk, next_trip, True))
                     
         slots.sort()
         
         if slots:
             best_slot = slots[0]
-            _, _, _, _, best_bk, best_trip, is_new = best_slot
+            _, _, _, _, _, best_bk, best_trip, is_new = best_slot
             info = truck_pool[best_bk]
             
             if is_new:
@@ -422,6 +429,7 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
             
             result.loc[idx, "RUTA"] = best_bk
             result.loc[idx, "VIAJE"] = best_trip
+            client_assigned_bk[client_name] = best_bk
             return True
             
         # Fallback for oversized orders or when all trucks are full
@@ -429,14 +437,15 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
         for bk, info in truck_pool.items():
             if forced_bk and bk != forced_bk:
                 continue
+            is_preferred = -1 if (preferred_bk and bk == preferred_bk) else 0
             cap_idx = CAPACITY_PRIORITY.index(info["cap"]) if info["cap"] in CAPACITY_PRIORITY else 99
             next_trip = forced_trip if forced_trip else max(info["trips_pallets"].keys(), default=0) + 1
             if next_trip <= info["max_trips"]:
-                fallback_slots.append((cap_idx, bk, next_trip))
+                fallback_slots.append((is_preferred, cap_idx, bk, next_trip))
                 
         fallback_slots.sort()
         if fallback_slots:
-            _, best_bk, best_trip = fallback_slots[0]
+            _, _, best_bk, best_trip = fallback_slots[0]
             info = truck_pool[best_bk]
             for t in range(1, best_trip + 1):
                 if t not in info["trips_pallets"]:
@@ -447,6 +456,7 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
                 info["trips_locations"][best_trip].append((lat, lon))
             result.loc[idx, "RUTA"] = best_bk
             result.loc[idx, "VIAJE"] = best_trip
+            client_assigned_bk[client_name] = best_bk
             return True
             
         result.loc[idx, "RUTA"] = "SIN ASIGNAR"
