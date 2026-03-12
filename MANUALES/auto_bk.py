@@ -23,6 +23,8 @@ MAX_TRIPS = 3
 # Special clients: client name substring → forced BK
 SPECIAL_CLIENTS = {
     "Mishkt": "BK3766",
+    "cencosud": "BK3723",
+    "dexcim": "BK3775",
 }
 
 # Priority order: prefer bigger trucks first
@@ -341,11 +343,20 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     result["RUTA"] = ""
     result["VIAJE"] = 0
 
+    # Group by client so a client's orders are processed together
+    # Prioritize clients with most total pallets
+    client_totals = result.groupby("Nombre 1")["Suma de Palets"].sum().to_dict()
+    
     order_indices = list(result.index)
-    order_indices.sort(key=lambda i: -result.loc[i, "Suma de Palets"])
+    order_indices.sort(key=lambda i: (
+        -client_totals.get(result.loc[i, "Nombre 1"], 0),
+        str(result.loc[i, "Nombre 1"]),
+        -result.loc[i, "Suma de Palets"]
+    ))
 
-    if seed != 42:
-        rng.shuffle(order_indices)
+    # Disable generic shuffle if we want to preserve client grouping
+    # if seed != 42:
+    #     rng.shuffle(order_indices)
 
     def find_and_assign(idx, forced_bk=None, forced_trip=None):
         """Find best truck for this order and assign it."""
