@@ -18,7 +18,7 @@ CAPACITY_PALLETS = {
     0: 0,
 }
 
-MAX_TRIPS = 3
+MAX_TRIPS = 2
 
 # Special clients: client name substring → forced BK
 SPECIAL_CLIENTS = {
@@ -370,7 +370,16 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
         zone = str(result.loc[idx, "Distrito"]).strip()
         client_name = str(result.loc[idx, "Nombre 1"])
         
+        # If no preferred BK yet, and client has many pallets (e.g. >= 15), try to default to BK3714 (BK14)
+        is_large_client = client_totals.get(client_name, 0) >= 15
+        
         preferred_bk = forced_bk or client_assigned_bk.get(client_name)
+        if not preferred_bk and is_large_client:
+            # Check if BK3714 exists in pool
+            if any("14" in b for b in truck_pool.keys() if "BK" in b):
+                bk14_name = next((b for b in truck_pool.keys() if "14" in b and "BK" in b), None)
+                if bk14_name:
+                    preferred_bk = bk14_name
         
         lat = pd.to_numeric(result.loc[idx, "Latitud"], errors="coerce") if "Latitud" in result.columns else float('nan')
         lon = pd.to_numeric(result.loc[idx, "Longitud"], errors="coerce") if "Longitud" in result.columns else float('nan')
@@ -680,7 +689,7 @@ def render_daily_conditions(df_trucks, df_orders):
                     "Viajes", 
                     min_value=1, 
                     max_value=5, 
-                    value=current_val, 
+                    value=int(current_val), 
                     key=f"trip_limit_{bk}",
                     label_visibility="collapsed"
                 )
