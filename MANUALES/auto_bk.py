@@ -4,6 +4,8 @@ import numpy as np
 import math
 import random
 import io
+import folium
+from streamlit_folium import st_folium
 
 # ─────────────────────── CONFIG ───────────────────────
 st.set_page_config(page_title="Automatizador BK - Backus", page_icon="🚚", layout="wide")
@@ -32,7 +34,7 @@ CAPACITY_PRIORITY = [1008, 672, 360, 200, 105]
 
 # Expected columns for validation
 TRUCK_REQUIRED_COLS = ["RUTA", "ZONAS", "Capac.", "Status"]
-ORDER_REQUIRED_COLS = ["Solic#", "Nombre 1", "ST", "Prepago", "Latitud", "Longitud", "Distrito", "ZV", "Doc#venta", "Suma de Cantidad de pedido", "Suma de Palets"]
+ORDER_REQUIRED_COLS = ["Solic#", "Nombre 1", "ST", "Prepago", "Latitud", "Longitud", "Distrito", "ZV", "Doc#venta", "Suma de Cantidad de pedido", "Suma de Palets", "Prioridad"]
 
 
 # ─────────────────────── STYLES ───────────────────────
@@ -289,6 +291,20 @@ def load_uploaded_data(uploaded_file, required_cols, file_label):
             return None, None
 
         df = pd.read_excel(uploaded_file, sheet_name=best_sheet)
+        
+        # Normalize column names to handle casing or spacing issues
+        df.columns = df.columns.astype(str).str.strip()
+        rename_dict = {}
+        for col in df.columns:
+            col_upper = col.upper()
+            if "PALET" in col_upper:
+                rename_dict[col] = "Suma de Palets"
+            elif "CANTIDAD DE PEDIDO" in col_upper:
+                rename_dict[col] = "Suma de Cantidad de pedido"
+            elif "PRIORIDAD" in col_upper:
+                rename_dict[col] = "Prioridad"
+        if rename_dict:
+            df = df.rename(columns=rename_dict)
 
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
@@ -347,12 +363,24 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     result["RUTA"] = ""
     result["VIAJE"] = 0
 
+    # Convert Prioridad to numeric
+    result["Prioridad_Num"] = pd.to_numeric(result.get("Prioridad", 0), errors="coerce").fillna(0)
+
+    # Clean Latitud and Longitud (replace commas with dots and convert to numeric)
+    if "Latitud" in result.columns:
+        result["Latitud"] = pd.to_numeric(result["Latitud"].astype(str).str.replace(",", "."), errors="coerce")
+    if "Longitud" in result.columns:
+        result["Longitud"] = pd.to_numeric(result["Longitud"].astype(str).str.replace(",", "."), errors="coerce")
+
     # Group by client so a client's orders are processed together
-    # Prioritize clients with most total pallets
+    # Measure max priority per client so the whole client gets pulled if one order is priority
     client_totals = result.groupby("Nombre 1")["Suma de Palets"].sum().to_dict()
+    client_unassigned_dict = client_totals.copy()
+    client_priority = result.groupby("Nombre 1")["Prioridad_Num"].max().to_dict()
     
     order_indices = list(result.index)
     order_indices.sort(key=lambda i: (
+        -client_priority.get(result.loc[i, "Nombre 1"], 0),
         -client_totals.get(result.loc[i, "Nombre 1"], 0),
         str(result.loc[i, "Nombre 1"]),
         -result.loc[i, "Suma de Palets"]
@@ -368,18 +396,19 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
         """Find best truck for this order and assign it."""
         pallets = result.loc[idx, "Suma de Palets"]
         zone = str(result.loc[idx, "Distrito"]).strip()
-        client_name = str(result.loc[idx, "Nombre 1"])
+        client_name = str(result.loc[idx, "Nombre 1"]).strip()
+        client_unassigned = client_unassigned_dict.get(client_name, 0)
         
-        # If no preferred BK yet, and client has many pallets (e.g. >= 15), try to default to BK3714 (BK14)
+        # If no preferred BK yet, and client has many pallets (e.g. >= 15), try to default to BK3730 (BK30)
         is_large_client = client_totals.get(client_name, 0) >= 15
         
         preferred_bk = forced_bk or client_assigned_bk.get(client_name)
         if not preferred_bk and is_large_client:
-            # Check if BK3714 exists in pool
-            if any("14" in b for b in truck_pool.keys() if "BK" in b):
-                bk14_name = next((b for b in truck_pool.keys() if "14" in b and "BK" in b), None)
-                if bk14_name:
-                    preferred_bk = bk14_name
+            # Check if BK3730 exists in pool
+            if any("30" in b for b in truck_pool.keys() if "BK" in b):
+                bk30_name = next((b for b in truck_pool.keys() if "30" in b and "BK" in b), None)
+                if bk30_name:
+                    preferred_bk = bk30_name
         
         lat = pd.to_numeric(result.loc[idx, "Latitud"], errors="coerce") if "Latitud" in result.columns else float('nan')
         lon = pd.to_numeric(result.loc[idx, "Longitud"], errors="coerce") if "Longitud" in result.columns else float('nan')
@@ -396,34 +425,45 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
             
             is_preferred = -1 if (preferred_bk and bk == preferred_bk) else 0
             
-            # 1. Existing trips
+            # Estimate daily remaining capacity for this truck to see if it can fit the rest of the client's orders
+            initialized_cap = sum(info["trips_pallets"].values())
+            max_assigned_trip = max(info["trips_pallets"].keys()) if info["trips_pallets"] else 0
+            unassigned_trips = info["max_trips"] - max_assigned_trip
+            daily_rem = initialized_cap + unassigned_trips * info["pallet_cap"]
+            can_fit_entire_client = 0 if round(daily_rem, 2) >= round(client_unassigned, 2) else 1
+            
+            # 1. Existing trips (Fill up existing trucks BEFORE opening new ones)
             for t, rem_pallets in info["trips_pallets"].items():
                 if forced_trip and t != forced_trip:
                     continue
-                if rem_pallets >= pallets - 0.01:
+                if round(rem_pallets, 2) >= round(pallets, 2):
                     dist = 0
                     if has_loc and len(info["trips_locations"][t]) > 0:
                         locs = info["trips_locations"][t]
                         c_lat = sum(p[0] for p in locs) / len(locs)
                         c_lon = sum(p[1] for p in locs) / len(locs)
                         dist = math.sqrt((lat - c_lat)**2 + (lon - c_lon)**2)
-                    slots.append((is_preferred, dist, 0, cap_idx, zone_match, bk, t, False))
+                    # ORDER: (is_preferred, can_fit_entire_client, is_new=0, distance, capacity, zone, bk, trip_num, is_new_bool)
+                    slots.append((is_preferred, can_fit_entire_client, 0, dist, cap_idx, zone_match, bk, t, False))
                     
-            # 2. Potential new trip
-            next_trip = max(info["trips_pallets"].keys(), default=0) + 1
-            if next_trip <= info["max_trips"] and info["pallet_cap"] >= pallets - 0.01:
+            # 2. Potential new trip (Prefer the SMALLEST truck that fits the load)
+            next_trip = max_assigned_trip + 1
+            if next_trip <= info["max_trips"] and round(info["pallet_cap"], 2) >= round(pallets, 2):
+                # capacity difference: tighter fit is better
+                cap_fit = info["pallet_cap"] - pallets 
                 if forced_trip and forced_trip != next_trip:
                     if forced_trip <= info["max_trips"]:
-                        slots.append((is_preferred, 0.05 if has_loc else 0.001, 1, cap_idx, zone_match, bk, forced_trip, True))
+                        slots.append((is_preferred, can_fit_entire_client, 1, 0.05 if has_loc else 0.001, cap_fit, zone_match, bk, forced_trip, True))
                 else:
                     dist_penalty = 0.03 if has_loc else 0.001
-                    slots.append((is_preferred, dist_penalty, 1, cap_idx, zone_match, bk, next_trip, True))
+                    slots.append((is_preferred, can_fit_entire_client, 1, dist_penalty, cap_fit, zone_match, bk, next_trip, True))
                     
         slots.sort()
         
         if slots:
             best_slot = slots[0]
-            _, _, _, _, _, best_bk, best_trip, is_new = best_slot
+            # Unpack 9 elements: is_preferred, can_fit_entire_client, is_new=0/1, distance, capacity, zone, bk, trip_num, is_new_bool
+            _, _, _, _, _, _, best_bk, best_trip, is_new = best_slot
             info = truck_pool[best_bk]
             
             if is_new:
@@ -439,6 +479,7 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
             result.loc[idx, "RUTA"] = best_bk
             result.loc[idx, "VIAJE"] = best_trip
             client_assigned_bk[client_name] = best_bk
+            client_unassigned_dict[client_name] -= pallets
             return True
             
         # Fallback for oversized orders or when all trucks are full
@@ -466,6 +507,7 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
             result.loc[idx, "RUTA"] = best_bk
             result.loc[idx, "VIAJE"] = best_trip
             client_assigned_bk[client_name] = best_bk
+            client_unassigned_dict[client_name] -= pallets
             return True
             
         result.loc[idx, "RUTA"] = "SIN ASIGNAR"
@@ -766,6 +808,169 @@ def render_daily_conditions(df_trucks, df_orders):
     return set(excluded), st.session_state.priority_rules, st.session_state.custom_max_trips
 
 
+# ─────────────────────── MAP UI ───────────────────────
+def render_map_section(df_result):
+    st.markdown('<div class="section-header">🌍 Mapa de Rutas de Entrega</div>', unsafe_allow_html=True)
+    
+    # Check for missing coords
+    df_missing = df_result[(df_result["Latitud"].isna()) | (df_result["Longitud"].isna())]
+    clients_missing = sorted(pd.Series(df_missing["Nombre 1"].unique()).dropna().tolist())
+    
+    col_ctrl, col_map = st.columns([1, 2.5])
+    
+    with col_ctrl:
+        st.markdown("#### 📍 Corregir Coordenadas")
+        if clients_missing:
+            st.warning(f"{len(clients_missing)} cliente(s) sin coordenadas.")
+            client_to_fix = st.selectbox("Selecciona un cliente:", clients_missing)
+            st.info("Haz clic en el mapa para capturar lat/lon y luego guárdalos.")
+            
+            saved_lat = st.number_input("Latitud", value=st.session_state.get("last_clicked_lat", 0.0), format="%.6f")
+            saved_lon = st.number_input("Longitud", value=st.session_state.get("last_clicked_lon", 0.0), format="%.6f")
+            
+            if st.button("💾 Guardar Coordenada", type="primary"):
+                if saved_lat != 0.0 and saved_lon != 0.0:
+                    st.session_state["df_orders"].loc[st.session_state["df_orders"]["Nombre 1"] == client_to_fix, "Latitud"] = saved_lat
+                    st.session_state["df_orders"].loc[st.session_state["df_orders"]["Nombre 1"] == client_to_fix, "Longitud"] = saved_lon
+                    st.success(f"Coordenadas actualizadas!")
+                    st.rerun()
+        else:
+            st.success("Toda la data tiene coordenadas válidas.")
+            
+        st.markdown("---")
+        st.markdown("#### 🔍 Filtrar Camiones (BK)")
+        all_bks = [bk for bk in df_result["RUTA"].unique() if bk != "SIN ASIGNAR"]
+        
+        # Multiselect with default to all BKs
+        selected_bks = st.multiselect(
+            "Selecciona qué camiones dibujar en el mapa:",
+            options=all_bks,
+            default=all_bks,
+            help="Puedes borrar o añadir camiones para ver su ruta en detalle sin ruido."
+        )
+    with col_map:
+        center_lat, center_lon = -12.0464, -77.0428
+        df_valid = df_result.dropna(subset=["Latitud", "Longitud"])
+        if not df_valid.empty:
+            center_lat = df_valid["Latitud"].mean()
+            center_lon = df_valid["Longitud"].mean()
+            
+        # Apply the filter from the multiselect
+        if selected_bks:
+            df_valid = df_valid[df_valid["RUTA"].isin(selected_bks + ["SIN ASIGNAR"])]
+            
+        # Increased zoom to see places closer
+        m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
+        
+        colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'lightred', 'beige', 'darkblue', 'darkgreen', 'cadetblue', 'darkpurple', 'pink', 'lightblue', 'lightgreen', 'gray', 'black']
+        # Maintain original color mapping based on all_bks so colors don't jump around when filtering
+        bk_color = {bk: colors[i % len(colors)] for i, bk in enumerate(all_bks)}
+        
+        bks_to_draw = selected_bks
+        
+        # Map colors for route lines to ensure CSS compatibility
+        route_colors = {
+            'lightred': '#FF7F7F',
+            'darkred': '#8B0000',
+            'cadetblue': '#5F9EA0',
+            'darkpurple': '#301934',
+            'lightblue': '#ADD8E6',
+            'lightgreen': '#90EE90'
+        }
+        
+        for idx, row in df_valid.iterrows():
+            marker_color = "gray" if row["RUTA"] == "SIN ASIGNAR" else bk_color.get(row["RUTA"], "blue")
+            r_lat = row["Latitud"] + random.uniform(-0.0001, 0.0001)
+            r_lon = row["Longitud"] + random.uniform(-0.0001, 0.0001)
+            
+            clean_name = str(row['Nombre 1']).replace('\n', ' ').replace('\r', '').replace('"', '&quot;').replace("'", "&#39;")
+            
+            popup_html = f"<b>{clean_name}</b><br>BK: {row['RUTA']}<br>Viaje: {row['VIAJE']}<br>Palets: {row['Suma de Palets']}"
+            
+            # The standard pin
+            folium.Marker(
+                [r_lat, r_lon],
+                popup=popup_html,
+                tooltip=clean_name,
+                icon=folium.Icon(color=marker_color, icon="info-sign")
+            ).add_to(m)
+            
+            # A permanent visible label (DivIcon) slightly offset to not cover the pin entirely
+            # Only draw the label if it's assigned to a truck (to avoid clutter on unassigned)
+            if row["RUTA"] != "SIN ASIGNAR":
+                label_html = f'''
+                    <div style="font-size: 10px; font-weight: bold; color: white; background-color: #333; 
+                                border: 1px solid white; border-radius: 4px; padding: 2px 4px; 
+                                white-space: nowrap; box-shadow: 1px 1px 3px rgba(0,0,0,0.5);">
+                        V{row["VIAJE"]}
+                    </div>
+                '''
+                folium.Marker(
+                    [r_lat, r_lon],
+                    icon=folium.DivIcon(
+                        icon_size=(150, 36),
+                        icon_anchor=(-10, 15), # offset to sit to the right and slightly down from the tip
+                        html=label_html
+                    )
+                ).add_to(m)
+            
+        # Draw PolyLines to visualize routes
+        warehouse_lat, warehouse_lon = -12.038910658185326, -77.02590477529496  # CD RIMAC
+        
+        for bk in bks_to_draw:
+            df_bk = df_valid[df_valid["RUTA"] == bk]
+            marker_color = bk_color.get(bk, "blue")
+            line_color = route_colors.get(marker_color, marker_color)
+            
+            for viaje in df_bk["VIAJE"].unique():
+                df_viaje = df_bk[df_bk["VIAJE"] == viaje].sort_values("Prioridad_Num", ascending=False)
+                # Create coordinate list starting from the warehouse
+                route_coords = [[warehouse_lat, warehouse_lon]] + [[row["Latitud"], row["Longitud"]] for _, row in df_viaje.iterrows()]
+                if len(route_coords) > 1:
+                    # Draw a line connecting the points in the trip
+                    folium.PolyLine(
+                        route_coords,
+                        color=line_color,
+                        weight=3,
+                        opacity=0.7,
+                        dash_array="10",
+                        tooltip=f"Ruta {bk} - Viaje {viaje}"
+                    ).add_to(m)
+                    
+        # Add warehouse marker
+        folium.Marker(
+            [warehouse_lat, warehouse_lon],
+            popup="<b>CD RIMAC</b><br>Centro de Distribución (Origen)",
+            tooltip="CD RIMAC",
+            icon=folium.Icon(color="black", icon="home", prefix="fa")
+        ).add_to(m)
+
+        # Draw floating legend
+        legend_html = '''
+         <div style="position: fixed; 
+                     bottom: 50px; left: 50px; width: 180px; height: auto; 
+                     max-height: 400px; overflow-y: auto;
+                     background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+                     border-radius: 8px; padding: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.3);">
+             <b style="color: black; margin-bottom: 8px; display: block;">🚚 Leyenda de Camiones</b>
+         '''
+        for bk in bks_to_draw:
+            legend_html += f'<div><i class="fa fa-truck" style="color:{route_colors.get(bk_color.get(bk, "blue"), bk_color.get(bk, "blue"))}; margin-right: 5px;"></i><span style="color: black;">{bk}</span></div>'
+        
+        legend_html += "</div>"
+        m.get_root().html.add_child(folium.Element(legend_html))
+
+        # Display map and only listen for clicks to avoid infinite rerun loops on zoom/pan
+        map_data = st_folium(m, height=500, use_container_width=True, key="route_map", returned_objects=["last_clicked"])
+        
+        if map_data and map_data.get("last_clicked"):
+            lat = map_data["last_clicked"]["lat"]
+            lon = map_data["last_clicked"]["lng"]
+            if lat != st.session_state.get("last_clicked_lat") or lon != st.session_state.get("last_clicked_lon"):
+                st.session_state["last_clicked_lat"] = lat
+                st.session_state["last_clicked_lon"] = lon
+                st.rerun()
+
 # ─────────────────────── MAIN APP ───────────────────────
 def main():
     inject_styles()
@@ -839,9 +1044,9 @@ def main():
             | BK3701 | SAN JUAN DE LURIGANCHO | CORP. BREXIMAR | 6004091 | PEBXG-761 | 1008 | MERCEDES | T77 | 10716 | DISPONIBLE | |
 
             **Archivo de Clientes / Pedidos** debe contener:
-            | Solic# | Nombre 1 | ST | Prepago | Distrito | ZV | Doc#venta | Denominación | Suma de Cantidad de pedido | Suma de Palets |
-            |--------|----------|-----|---------|----------|------|-----------|--------------|---------------------------|----------------|
-            | 14324063 | Distribuidora ABC | 01 | NO PREPAGO | LIMA | PEM786 | 7655454725 | Cerveza | 1008 | 12.0 |
+            | Solic# | Nombre 1 | ST | Prepago | Latitud | Longitud | Distrito | ZV | Doc#venta | Suma de Cantidad de pedido | Suma de Palets | Prioridad |
+            |--------|----------|-----|---------|----------|----------|----------|------|-----------|---------------------------|----------------|-----------|
+            | 14324063 | Distribuidora ABC | 01 | NO PREPAGO | -12.04 | -77.02 | LIMA | PEM786 | 7655454725 | 1008 | 12.0 | 1 |
             """)
 
             st.markdown("**Capacidades configuradas:**")
@@ -975,106 +1180,113 @@ def main():
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ─── MAIN TABLE ───
-    st.markdown('<div class="section-header">📋 Tabla de asignación completa</div>', unsafe_allow_html=True)
+    tab_data, tab_map = st.tabs(["📋 Tabla y Descargas", "🗺️ Mapa Geoespacial"])
 
-    st.dataframe(
-        df_result,
-        use_container_width=True,
-        hide_index=True,
-        height=450,
-        column_config={
-            "RUTA": st.column_config.TextColumn("🚚 RUTA", width="medium"),
-            "VIAJE": st.column_config.NumberColumn("🔄 VIAJE", format="%d"),
-            "Suma de Palets": st.column_config.NumberColumn("📦 Palets", format="%.2f"),
-            "Suma de Cantidad de pedido": st.column_config.NumberColumn("📝 Cant. Pedido", format="%d"),
-            "Nombre 1": st.column_config.TextColumn("👤 Cliente", width="large"),
-            "Distrito": st.column_config.TextColumn("📍 Distrito"),
-        }
-    )
+    with tab_data:
+        # ─── MAIN TABLE ───
+        st.markdown('<div class="section-header">📋 Tabla de asignación completa</div>', unsafe_allow_html=True)
 
-    # ─── EXPORT ───
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📥 Descargar resultados</div>', unsafe_allow_html=True)
-
-    # Pre-generate Excel files
-    excel_per_bk_data = generate_excel_per_bk(df_result, truck_pool)
-    excel_simple_data = generate_excel_simple(df_result)
-
-    col_exp1, col_exp2, col_exp3 = st.columns(3)
-
-    with col_exp1:
-        st.download_button(
-            label="📥 Excel por BK (hojas separadas)",
-            data=excel_per_bk_data,
-            file_name="asignacion_por_bk.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        st.dataframe(
+            df_result,
             use_container_width=True,
-            help="Un Excel con una hoja por cada camión BK + resumen general",
+            hide_index=True,
+            height=450,
+            column_config={
+                "RUTA": st.column_config.TextColumn("🚚 RUTA", width="medium"),
+                "VIAJE": st.column_config.NumberColumn("🔄 VIAJE", format="%d"),
+                "Suma de Palets": st.column_config.NumberColumn("📦 Palets", format="%.2f"),
+                "Suma de Cantidad de pedido": st.column_config.NumberColumn("📝 Cant. Pedido", format="%d"),
+                "Nombre 1": st.column_config.TextColumn("👤 Cliente", width="large"),
+                "Distrito": st.column_config.TextColumn("📍 Distrito"),
+                "Prioridad": st.column_config.NumberColumn("⭐ Prioridad"),
+            }
         )
 
-    with col_exp2:
-        st.download_button(
-            label="📥 Excel completo (1 hoja)",
-            data=excel_simple_data,
-            file_name="asignacion_bk_completa.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        # ─── EXPORT ───
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📥 Descargar resultados</div>', unsafe_allow_html=True)
+
+        # Pre-generate Excel files
+        excel_per_bk_data = generate_excel_per_bk(df_result, truck_pool)
+        excel_simple_data = generate_excel_simple(df_result)
+
+        col_exp1, col_exp2, col_exp3 = st.columns(3)
+
+        with col_exp1:
+            st.download_button(
+                label="📥 Excel por BK (hojas separadas)",
+                data=excel_per_bk_data,
+                file_name="asignacion_por_bk.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                help="Un Excel con una hoja por cada camión BK + resumen general",
+            )
+
+        with col_exp2:
+            st.download_button(
+                label="📥 Excel completo (1 hoja)",
+                data=excel_simple_data,
+                file_name="asignacion_bk_completa.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+        with col_exp3:
+            csv_data = df_result.to_csv(index=False).encode("utf-8")
+            st.download_button(
+                label="📥 Descargar CSV",
+                data=csv_data,
+                file_name="asignacion_bk.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ─── BK CARDS ───
+        st.markdown('<div class="section-header">🚚 Detalle por camión (BK)</div>', unsafe_allow_html=True)
+
+        bk_names_used = [bk for bk in df_result["RUTA"].unique() if bk != "SIN ASIGNAR"]
+        bk_order = []
+        for bk in bk_names_used:
+            cap = truck_pool[bk]["cap"] if bk in truck_pool else 0
+            bk_order.append((bk, cap))
+        bk_order.sort(key=lambda x: (-x[1], x[0]))
+
+        if "SIN ASIGNAR" in df_result["RUTA"].values:
+            bk_order.append(("SIN ASIGNAR", -1))
+
+        col_left, col_right = st.columns(2)
+        for i, (bk_name, _) in enumerate(bk_order):
+            bk_data = df_result[df_result["RUTA"] == bk_name]
+            with col_left if i % 2 == 0 else col_right:
+                render_bk_card(bk_name, bk_data, truck_pool)
+
+        # ─── SUMMARY BY ZONE ───
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<div class="section-header">📍 Resumen por zona</div>', unsafe_allow_html=True)
+
+        zone_agg_col = "Doc#venta" if "Doc#venta" in df_result.columns else "Nombre 1"
+        zone_summary = df_result.groupby("Distrito").agg(
+            Pedidos=(zone_agg_col, "count"),
+            Palets=("Suma de Palets", "sum"),
+            Camiones=("RUTA", "nunique"),
+        ).sort_values("Palets", ascending=False).reset_index()
+
+        st.dataframe(
+            zone_summary,
             use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Distrito": st.column_config.TextColumn("📍 Distrito"),
+                "Pedidos": st.column_config.NumberColumn("📝 Pedidos", format="%d"),
+                "Palets": st.column_config.NumberColumn("📦 Palets", format="%.1f"),
+                "Camiones": st.column_config.NumberColumn("🚚 Camiones", format="%d"),
+            }
         )
 
-    with col_exp3:
-        csv_data = df_result.to_csv(index=False).encode("utf-8")
-        st.download_button(
-            label="📥 Descargar CSV",
-            data=csv_data,
-            file_name="asignacion_bk.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ─── BK CARDS ───
-    st.markdown('<div class="section-header">🚚 Detalle por camión (BK)</div>', unsafe_allow_html=True)
-
-    bk_names_used = [bk for bk in df_result["RUTA"].unique() if bk != "SIN ASIGNAR"]
-    bk_order = []
-    for bk in bk_names_used:
-        cap = truck_pool[bk]["cap"] if bk in truck_pool else 0
-        bk_order.append((bk, cap))
-    bk_order.sort(key=lambda x: (-x[1], x[0]))
-
-    if "SIN ASIGNAR" in df_result["RUTA"].values:
-        bk_order.append(("SIN ASIGNAR", -1))
-
-    col_left, col_right = st.columns(2)
-    for i, (bk_name, _) in enumerate(bk_order):
-        bk_data = df_result[df_result["RUTA"] == bk_name]
-        with col_left if i % 2 == 0 else col_right:
-            render_bk_card(bk_name, bk_data, truck_pool)
-
-    # ─── SUMMARY BY ZONE ───
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="section-header">📍 Resumen por zona</div>', unsafe_allow_html=True)
-
-    zone_agg_col = "Doc#venta" if "Doc#venta" in df_result.columns else "Nombre 1"
-    zone_summary = df_result.groupby("Distrito").agg(
-        Pedidos=(zone_agg_col, "count"),
-        Palets=("Suma de Palets", "sum"),
-        Camiones=("RUTA", "nunique"),
-    ).sort_values("Palets", ascending=False).reset_index()
-
-    st.dataframe(
-        zone_summary,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Distrito": st.column_config.TextColumn("📍 Distrito"),
-            "Pedidos": st.column_config.NumberColumn("📝 Pedidos", format="%d"),
-            "Palets": st.column_config.NumberColumn("📦 Palets", format="%.1f"),
-            "Camiones": st.column_config.NumberColumn("🚚 Camiones", format="%d"),
-        }
-    )
+    with tab_map:
+        render_map_section(df_result)
 
     # Footer
     st.markdown("---")
