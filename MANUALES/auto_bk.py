@@ -365,12 +365,12 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     # Convert to list and filter valid trucks
     required_bks_list = [bk for bk in required_bks if bk in df_trucks_avail["RUTA"].values]
     
-    # Sort available trucks by Capacity descending
-    # Prioritize 1008 capacity trucks
+    # Sort available trucks by Capacity strictly descending to guarantee the largest vehicles (1008)
     df_trucks_avail = df_trucks_avail.copy()
-    # Create a sorting score to ensure required BKs are at the top, then by largest capacity
+    # Create a tie-breaker score to ensure required BKs are chosen if multiple trucks have the same capacity
     df_trucks_avail["is_required"] = df_trucks_avail["RUTA"].isin(required_bks_list).astype(int)
-    df_trucks_sorted = df_trucks_avail.sort_values(["is_required", "Capac."], ascending=[False, False])
+    # Priority 1: Capacity. Priority 2: Is it a forced truck?
+    df_trucks_sorted = df_trucks_avail.sort_values(["Capac.", "is_required"], ascending=[False, False])
     
     # Take ONLY 4 trucks total!
     df_trucks_limited = df_trucks_sorted.head(4).reset_index(drop=True)
