@@ -20,7 +20,8 @@ CAPACITY_PALLETS = {
     0: 0,
 }
 
-MAX_TRIPS = 2
+# Radical change: 5 trips max per default
+MAX_TRIPS = 5
 
 # Special clients: client name substring → forced BK
 SPECIAL_CLIENTS = {
@@ -347,8 +348,35 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     priority_rules = priority_rules or []
     custom_max_trips = custom_max_trips or {}
 
+    # Identify required BKs based on special clients and priority rules that actually appear in orders
+    required_bks = set()
+    for rule in priority_rules:
+        substr = rule.get("client_substr", "")
+        forced_bk = rule.get("forced_bk")
+        if substr and forced_bk and forced_bk != "Automático":
+            # Check if this substr is in orders
+            if df_orders["Nombre 1"].astype(str).str.contains(substr, case=False, na=False).any():
+                required_bks.add(forced_bk)
+                
+    for substr, forced_bk in special_clients.items():
+        if df_orders["Nombre 1"].astype(str).str.contains(substr, case=False, na=False).any():
+            required_bks.add(forced_bk)
+
+    # Convert to list and filter valid trucks
+    required_bks_list = [bk for bk in required_bks if bk in df_trucks_avail["RUTA"].values]
+    
+    # Sort available trucks by Capacity descending
+    # Prioritize 1008 capacity trucks
+    df_trucks_avail = df_trucks_avail.copy()
+    # Create a sorting score to ensure required BKs are at the top, then by largest capacity
+    df_trucks_avail["is_required"] = df_trucks_avail["RUTA"].isin(required_bks_list).astype(int)
+    df_trucks_sorted = df_trucks_avail.sort_values(["is_required", "Capac."], ascending=[False, False])
+    
+    # Take ONLY 4 trucks total!
+    df_trucks_limited = df_trucks_sorted.head(4).reset_index(drop=True)
+
     truck_pool = {}
-    for _, row in df_trucks_avail.iterrows():
+    for _, row in df_trucks_limited.iterrows():
         bk_name = row["RUTA"]
         truck_pool[bk_name] = {
             "cap": row["Capac."],
