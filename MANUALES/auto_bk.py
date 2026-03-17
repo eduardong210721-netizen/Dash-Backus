@@ -332,7 +332,7 @@ def get_available_trucks(df_trucks, excluded_bks=None):
 
 # ─────────────────────── ASSIGNMENT ALGORITHM ───────────────────────
 def assign_trucks(df_orders, df_trucks_avail, seed=42,
-                  special_clients=None, priority_rules=None, custom_max_trips=None):
+                  special_clients=None, priority_rules=None, custom_max_trips=None, max_trucks_allowed=4):
     """
     Assign trucks (BK) to orders based on pallet requirements.
 
@@ -372,8 +372,8 @@ def assign_trucks(df_orders, df_trucks_avail, seed=42,
     # Priority 1: Capacity. Priority 2: Is it a forced truck?
     df_trucks_sorted = df_trucks_avail.sort_values(["Capac.", "is_required"], ascending=[False, False])
     
-    # Take ONLY 4 trucks total!
-    df_trucks_limited = df_trucks_sorted.head(4).reset_index(drop=True)
+    # Take ONLY 'max_trucks_allowed' trucks total!
+    df_trucks_limited = df_trucks_sorted.head(max_trucks_allowed).reset_index(drop=True)
 
     truck_pool = {}
     for _, row in df_trucks_limited.iterrows():
@@ -1108,6 +1108,8 @@ def main():
 
         if "seed" not in st.session_state:
             st.session_state.seed = 42
+        if "max_trucks" not in st.session_state:
+            st.session_state.max_trucks = 4
 
         st.markdown("#### 🔄 Reorganizar asignación")
         st.caption("Genera una nueva distribución de camiones")
@@ -1132,6 +1134,20 @@ def main():
         )
         if manual_seed != st.session_state.seed:
             st.session_state.seed = manual_seed
+            st.rerun()
+
+        st.markdown("---")
+        
+        st.markdown("#### 🚚 Límite de Vehículos")
+        limit_trucks = st.number_input(
+            "Tope máximo de camiones a usar",
+            min_value=1,
+            max_value=50,
+            value=st.session_state.max_trucks,
+            help="El sistema usará SOLO esta cantidad de camiones (eligiendo estrictamente los de mayor capacidad)."
+        )
+        if limit_trucks != st.session_state.max_trucks:
+            st.session_state.max_trucks = limit_trucks
             st.rerun()
 
         st.markdown("---")
@@ -1175,6 +1191,7 @@ def main():
         seed=st.session_state.seed,
         priority_rules=priority_rules,
         custom_max_trips=custom_max_trips,
+        max_trucks_allowed=st.session_state.max_trucks
     )
 
     # ─── KPIs ───
