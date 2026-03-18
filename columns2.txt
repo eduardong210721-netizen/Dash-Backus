@@ -1,0 +1,12 @@
+Fecha
+Ruta
+Cliente
+Nombre
+Motivo No Entregado
+Unidad Negocio
+Responsable
+Eventos
+Cajas
+UNIDAD DE NEGOCIO FINAL
+LATITUD
+LONGITUD
