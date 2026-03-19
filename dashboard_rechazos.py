@@ -104,7 +104,7 @@ def load_data():
     df.columns = df.columns.astype(str).str.strip()
     
     # Strictly numeric tracking for new columns
-    for col in ['CCreado', 'CRechazado']:
+    for col in ['CCreado', 'CRechazado', 'CRechazadoParcial', 'CRechazadoTotal']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
             
@@ -116,6 +116,10 @@ def load_data():
         if 'Cajas' not in df.columns:
             df['Cajas'] = 1
         df['Cajas'] = pd.to_numeric(df['Cajas'], errors='coerce').fillna(0).round(0).astype(int)
+    
+    # Capacidad Camión as categorical string
+    if 'Capacidad Camión' in df.columns:
+        df['Capacidad Camión'] = df['Capacidad Camión'].fillna('Sin Info').astype(str).str.replace('.0', '', regex=False)
     
     # Safe float conversion for geocoordinates
     if 'Latitud' in df.columns:
@@ -152,7 +156,7 @@ def main():
     df = load_data()
     
     if df is None:
-        st.error("❌ No se encontró el archivo `RECHAZOS/DATA2.xlsx` en el directorio.")
+        st.error("❌ No se encontró el archivo `RECHAZOS/DATA3.xlsx` en el directorio.")
         return
         
     if df.empty:
@@ -224,20 +228,27 @@ def main():
         st.warning("⚠️ No hay datos para los filtros seleccionados.")
         return
 
-    # ── METRIC CALCULATIONS (% RELATIVE) ──
+    # ── METRIC CALCULATIONS (% RELATIVE — Parcial y Total por separado) ──
     total_c_creado = df['CCreado'].sum() if 'CCreado' in df.columns else len(df)
-    total_c_rechazado = df['CRechazado'].sum() if 'CRechazado' in df.columns else df['Cajas'].sum()
+    total_c_rechazado = df['CRechazado'].sum() if 'CRechazado' in df.columns else 0
+    total_parcial = df['CRechazadoParcial'].sum() if 'CRechazadoParcial' in df.columns else 0
+    total_total = df['CRechazadoTotal'].sum() if 'CRechazadoTotal' in df.columns else 0
     
-    porcentaje_rechazo = (total_c_rechazado / total_c_creado * 100) if total_c_creado > 0 else 0
+    pct_parcial = (total_parcial / total_c_creado * 100) if total_c_creado > 0 else 0
+    pct_total = (total_total / total_c_creado * 100) if total_c_creado > 0 else 0
     
-    # Calculate Peor BK based on % relative
+    # Calculate Peor BK based on % relative (usando CRechazadoParcial + CRechazadoTotal)
     ruta_critica = "N/A"
     ruta_critica_val = ""
     if 'Ruta' in df.columns and 'CCreado' in df.columns and not df.empty:
-        df_rutas = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+        agg_cols = {'CCreado': 'sum'}
+        if 'CRechazadoParcial' in df.columns: agg_cols['CRechazadoParcial'] = 'sum'
+        if 'CRechazadoTotal' in df.columns: agg_cols['CRechazadoTotal'] = 'sum'
+        df_rutas = df.groupby('Ruta').agg(agg_cols)
         df_rutas = df_rutas[df_rutas['CCreado'] > 0]
         if not df_rutas.empty:
-            df_rutas['pct'] = df_rutas['CRechazado'] / df_rutas['CCreado'] * 100
+            df_rutas['rechazado_sum'] = df_rutas.get('CRechazadoParcial', 0) + df_rutas.get('CRechazadoTotal', 0)
+            df_rutas['pct'] = df_rutas['rechazado_sum'] / df_rutas['CCreado'] * 100
             ruta_critica = str(df_rutas['pct'].idxmax())
             ruta_critica_val = f" ({df_rutas['pct'].max():.1f}%)"
             
@@ -245,53 +256,67 @@ def main():
     emp_corto = "N/A"
     emp_val = ""
     if col_empresa and 'CCreado' in df.columns and not df.empty:
-        df_emp = df.groupby(col_empresa).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+        agg_cols_e = {'CCreado': 'sum'}
+        if 'CRechazadoParcial' in df.columns: agg_cols_e['CRechazadoParcial'] = 'sum'
+        if 'CRechazadoTotal' in df.columns: agg_cols_e['CRechazadoTotal'] = 'sum'
+        df_emp = df.groupby(col_empresa).agg(agg_cols_e)
         df_emp = df_emp[df_emp['CCreado'] > 0]
         if not df_emp.empty:
-            df_emp['pct'] = df_emp['CRechazado'] / df_emp['CCreado'] * 100
+            df_emp['rechazado_sum'] = df_emp.get('CRechazadoParcial', 0) + df_emp.get('CRechazadoTotal', 0)
+            df_emp['pct'] = df_emp['rechazado_sum'] / df_emp['CCreado'] * 100
             emp_corto = str(df_emp['pct'].idxmax())
             emp_val = f" ({df_emp['pct'].max():.1f}%)"
 
     # ── KPI ROW ──
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         st.markdown(f'''
         <div class="kpi-card">
             <div class="kpi-value" style="color: {THEME_COLORS[1]}">{total_c_creado:,.0f}</div>
-            <div class="kpi-label">Total Pedidos Despachados</div>
+            <div class="kpi-label">Total Pedidos</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col2:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {KPI_COLORS['Negativo']}">{total_c_rechazado:,.0f}</div>
-            <div class="kpi-label">Pedidos Rechazados</div>
+            <div class="kpi-value" style="color: #FF9800">{total_parcial:,.0f}</div>
+            <div class="kpi-label">Rechazados Parciales</div>
+            <div style="color: #FF9800; font-size: 0.85rem; font-weight: 700;">{pct_parcial:.1f}%</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col3:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{porcentaje_rechazo:.1f}%</div>
-            <div class="kpi-label">% Rechazo Global</div>
+            <div class="kpi-value" style="color: {KPI_COLORS['Negativo']}">{total_total:,.0f}</div>
+            <div class="kpi-label">Rechazados Totales</div>
+            <div style="color: {KPI_COLORS['Negativo']}; font-size: 0.85rem; font-weight: 700;">{pct_total:.1f}%</div>
         </div>
         ''', unsafe_allow_html=True)
 
     with col4:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.2rem; margin-top: 10px;">{ruta_critica}{ruta_critica_val}</div>
-            <div class="kpi-label">BK Más Crítico (% Relativo)</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{total_c_rechazado:,.0f}</div>
+            <div class="kpi-label">Total Rechazados (P+T)</div>
         </div>
         ''', unsafe_allow_html=True)
-        
+
     with col5:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[3]}; font-size: 1.1rem; margin-top: 10px;">{emp_corto}{emp_val}</div>
-            <div class="kpi-label">Peor Empresa (% Relativo)</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{ruta_critica}{ruta_critica_val}</div>
+            <div class="kpi-label">BK Más Crítico</div>
+        </div>
+        ''', unsafe_allow_html=True)
+        
+    with col6:
+        st.markdown(f'''
+        <div class="kpi-card">
+            <div class="kpi-value" style="color: {THEME_COLORS[3]}; font-size: 1.05rem; margin-top: 8px;">{emp_corto}{emp_val}</div>
+            <div class="kpi-label">Peor Empresa</div>
         </div>
         ''', unsafe_allow_html=True)
 
@@ -302,25 +327,37 @@ def main():
     
     with col_c1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 10 BKs (% de Rechazo)")
+        st.markdown("#### Top 10 BKs (% de Rechazo — Parcial vs Total)")
         if 'Ruta' in df.columns and 'CCreado' in df.columns:
-            df_ruta = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+            agg_bk = {'CCreado': 'sum'}
+            if 'CRechazadoParcial' in df.columns: agg_bk['CRechazadoParcial'] = 'sum'
+            if 'CRechazadoTotal' in df.columns: agg_bk['CRechazadoTotal'] = 'sum'
+            df_ruta = df.groupby('Ruta').agg(agg_bk)
             df_ruta = df_ruta[df_ruta['CCreado'] > 0]
-            df_ruta['pct'] = df_ruta['CRechazado'] / df_ruta['CCreado'] * 100
-            df_ruta = df_ruta.reset_index().sort_values('pct', ascending=False).head(10)
+            df_ruta['pct_parcial'] = (df_ruta.get('CRechazadoParcial', 0) / df_ruta['CCreado'] * 100)
+            df_ruta['pct_total'] = (df_ruta.get('CRechazadoTotal', 0) / df_ruta['CCreado'] * 100)
+            df_ruta['pct_sum'] = df_ruta['pct_parcial'] + df_ruta['pct_total']
+            df_ruta = df_ruta.reset_index().sort_values('pct_sum', ascending=False).head(10)
+            
+            # Melt for stacked bar
+            df_melt = df_ruta.melt(id_vars='Ruta', value_vars=['pct_parcial', 'pct_total'],
+                                   var_name='Tipo', value_name='pct')
+            df_melt['Tipo'] = df_melt['Tipo'].replace({'pct_parcial': 'Parcial', 'pct_total': 'Total'})
+            
             fig_ruta = px.bar(
-                df_ruta, 
-                x='Ruta', y='pct', 
-                color='pct',
-                color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
-                text_auto='.1f'
+                df_melt, 
+                x='Ruta', y='pct', color='Tipo',
+                color_discrete_map={'Parcial': '#FF9800', 'Total': '#C62828'},
+                text_auto='.1f',
+                barmode='stack',
+                category_orders={'Ruta': df_ruta.sort_values('pct_sum', ascending=False)['Ruta'].tolist()}
             )
             fig_ruta.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#e2e8f0'),
                 margin=dict(l=20, r=20, t=10, b=20),
-                coloraxis_showscale=False
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             fig_ruta.update_yaxes(title_text="% Rechazado")
             st.plotly_chart(fig_ruta, use_container_width=True)
@@ -328,14 +365,22 @@ def main():
 
     with col_c2:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Distribución de Motivos")
+        st.markdown("#### Distribución de Motivos (vs Total Pedidos)")
         if 'Motivo No Entregado' in df.columns and 'CRechazado' in df.columns:
             df_motivo = df.groupby('Motivo No Entregado')['CRechazado'].sum().reset_index()
+            total_ped = total_c_creado if total_c_creado > 0 else 1
+            df_motivo['pct_total'] = (df_motivo['CRechazado'] / total_ped * 100).round(1)
+            df_motivo['label'] = df_motivo['CRechazado'].astype(str) + ' (' + df_motivo['pct_total'].astype(str) + '%)'
             fig_pie = px.pie(
                 df_motivo, 
                 names='Motivo No Entregado', values='CRechazado', 
                 color_discrete_sequence=THEME_COLORS,
                 hole=0.4
+            )
+            fig_pie.update_traces(
+                textinfo='label+percent',
+                hovertemplate='%{label}: %{value:,.0f} pedidos<br>%{customdata[0]:.1f}% del total',
+                customdata=df_motivo[['pct_total']].values
             )
             fig_pie.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -352,28 +397,40 @@ def main():
     
     with col_c3:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Impacto por Capacidad de Camión (%)")
+        st.markdown("#### Rechazo por Capacidad de Camión")
         col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
         if col_cap and 'CCreado' in df.columns:
-            df_cap = df.groupby(col_cap).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+            agg_cap = {'CCreado': 'sum'}
+            if 'CRechazadoParcial' in df.columns: agg_cap['CRechazadoParcial'] = 'sum'
+            if 'CRechazadoTotal' in df.columns: agg_cap['CRechazadoTotal'] = 'sum'
+            df_cap = df.groupby(col_cap).agg(agg_cap)
             df_cap = df_cap[df_cap['CCreado'] > 0]
-            df_cap['pct'] = df_cap['CRechazado'] / df_cap['CCreado'] * 100
-            df_cap = df_cap.reset_index().sort_values('pct', ascending=True)
+            df_cap['pct_parcial'] = (df_cap.get('CRechazadoParcial', 0) / df_cap['CCreado'] * 100)
+            df_cap['pct_total'] = (df_cap.get('CRechazadoTotal', 0) / df_cap['CCreado'] * 100)
+            df_cap['pct_sum'] = df_cap['pct_parcial'] + df_cap['pct_total']
+            df_cap = df_cap.reset_index().sort_values('pct_sum', ascending=True)
+            
+            df_cap_melt = df_cap.melt(id_vars=col_cap, value_vars=['pct_parcial', 'pct_total'],
+                                       var_name='Tipo', value_name='pct')
+            df_cap_melt['Tipo'] = df_cap_melt['Tipo'].replace({'pct_parcial': 'Parcial', 'pct_total': 'Total'})
                 
             fig_cap = px.bar(
-                df_cap, 
-                y=col_cap, x='pct', 
+                df_cap_melt, 
+                y=col_cap, x='pct', color='Tipo',
                 orientation='h',
-                color_discrete_sequence=[THEME_COLORS[2]],
-                text_auto='.1f'
+                color_discrete_map={'Parcial': '#FF9800', 'Total': '#C62828'},
+                text_auto='.1f',
+                barmode='stack'
             )
             fig_cap.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#e2e8f0'),
-                margin=dict(l=20, r=20, t=10, b=20)
+                margin=dict(l=20, r=20, t=10, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
             )
             fig_cap.update_xaxes(title_text="% Rechazado")
+            fig_cap.update_yaxes(type='category')
             st.plotly_chart(fig_cap, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -415,8 +472,7 @@ def main():
                 margins=True,
                 margins_name='TOTAL GENERAL'
             )
-            styled_table = pivot_emp.style.format("{:.0f}").background_gradient(cmap="Purples", axis=None, vmin=0)
-            st.dataframe(styled_table, use_container_width=True)
+            st.dataframe(pivot_emp.style.format("{:.0f}"), use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ── GEOSPATIAL MAP ──
