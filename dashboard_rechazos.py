@@ -132,12 +132,12 @@ def load_data():
     elif 'LONGITUD' in df.columns:
         df['LONGITUD'] = pd.to_numeric(df['LONGITUD'].astype(str).str.replace(',', '.'), errors='coerce')
         
-    # Standardize Responsable (used as grouping dimension for BK analysis)
-    if 'Responsable' in df.columns:
-        df['Responsable'] = df['Responsable'].fillna('Sin Responsable').astype(str)
-    # Keep Ruta if it exists from other sheets
+    # Standardize Ruta (BK) column — column AB in the Excel
     if 'Ruta' in df.columns:
         df['Ruta'] = df['Ruta'].fillna('SIN RUTA').astype(str)
+    # Responsable (AD) is a separate dimension (Sales/Customer/Logistic)
+    if 'Responsable' in df.columns:
+        df['Responsable'] = df['Responsable'].fillna('Sin Responsable').astype(str)
         
     # Standardize Motivos
     if 'Motivos Rechazos' in df.columns and 'Motivo No Entregado' not in df.columns:
@@ -170,7 +170,8 @@ def main():
     col_fecha = next((c for c in df.columns if 'FECHA' in c.upper()), None)
     col_unidad = next((c for c in df.columns if 'UNIDAD' in c.upper()), None)
     col_empresa = next((c for c in df.columns if 'EMPRESA' in c.upper()), None)
-    col_ruta = 'Responsable' if 'Responsable' in df.columns else None
+    col_ruta = 'Ruta' if 'Ruta' in df.columns else None
+    col_responsable = 'Responsable' if 'Responsable' in df.columns else None
     
     df_filtered = df.copy()
     
@@ -190,9 +191,14 @@ def main():
             df_filtered = df_filtered[df_filtered[col_empresa].astype(str).isin(empresas)]
             
     if col_ruta:
-        rutas = st.sidebar.multiselect("🚚 Responsable", options=sorted(df_filtered[col_ruta].dropna().astype(str).unique()))
+        rutas = st.sidebar.multiselect("🚚 BK (Ruta)", options=sorted(df_filtered[col_ruta].dropna().astype(str).unique()))
         if rutas:
             df_filtered = df_filtered[df_filtered[col_ruta].astype(str).isin(rutas)]
+            
+    if col_responsable:
+        responsables = st.sidebar.multiselect("👤 Responsable", options=sorted(df_filtered[col_responsable].dropna().astype(str).unique()))
+        if responsables:
+            df_filtered = df_filtered[df_filtered[col_responsable].astype(str).isin(responsables)]
             
     col_capacidad = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
     col_distrito = 'Distrito' if 'Distrito' in df.columns else None
@@ -238,14 +244,14 @@ def main():
     pct_parcial = (total_parcial / total_c_creado * 100) if total_c_creado > 0 else 0
     pct_total = (total_total / total_c_creado * 100) if total_c_creado > 0 else 0
     
-    # Calculate Responsable más crítico based on % relative
+    # Calculate Peor BK based on % relative
     ruta_critica = "N/A"
     ruta_critica_val = ""
-    if 'Responsable' in df.columns and 'CCreado' in df.columns and not df.empty:
+    if 'Ruta' in df.columns and 'CCreado' in df.columns and not df.empty:
         agg_cols = {'CCreado': 'sum'}
         if 'CRechazadoParcial' in df.columns: agg_cols['CRechazadoParcial'] = 'sum'
         if 'CRechazadoTotal' in df.columns: agg_cols['CRechazadoTotal'] = 'sum'
-        df_rutas = df.groupby('Responsable').agg(agg_cols)
+        df_rutas = df.groupby('Ruta').agg(agg_cols)
         df_rutas = df_rutas[df_rutas['CCreado'] > 0]
         if not df_rutas.empty:
             df_rutas['rechazado_sum'] = df_rutas.get('CRechazadoParcial', 0) + df_rutas.get('CRechazadoTotal', 0)
@@ -309,7 +315,7 @@ def main():
         st.markdown(f'''
         <div class="kpi-card">
             <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{ruta_critica}{ruta_critica_val}</div>
-            <div class="kpi-label">Responsable Más Crítico</div>
+            <div class="kpi-label">BK Más Crítico</div>
         </div>
         ''', unsafe_allow_html=True)
         
@@ -328,12 +334,12 @@ def main():
     
     with col_c1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 10 Responsables (% de Rechazo — Parcial vs Total)")
-        if 'Responsable' in df.columns and 'CCreado' in df.columns:
+        st.markdown("#### Top 10 BKs (% de Rechazo — Parcial vs Total)")
+        if 'Ruta' in df.columns and 'CCreado' in df.columns:
             agg_bk = {'CCreado': 'sum'}
             if 'CRechazadoParcial' in df.columns: agg_bk['CRechazadoParcial'] = 'sum'
             if 'CRechazadoTotal' in df.columns: agg_bk['CRechazadoTotal'] = 'sum'
-            df_ruta = df.groupby('Responsable').agg(agg_bk)
+            df_ruta = df.groupby('Ruta').agg(agg_bk)
             df_ruta = df_ruta[df_ruta['CCreado'] > 0]
             df_ruta['pct_parcial'] = (df_ruta.get('CRechazadoParcial', 0) / df_ruta['CCreado'] * 100)
             df_ruta['pct_total'] = (df_ruta.get('CRechazadoTotal', 0) / df_ruta['CCreado'] * 100)
@@ -341,17 +347,17 @@ def main():
             df_ruta = df_ruta.reset_index().sort_values('pct_sum', ascending=False).head(10)
             
             # Melt for stacked bar
-            df_melt = df_ruta.melt(id_vars='Responsable', value_vars=['pct_parcial', 'pct_total'],
+            df_melt = df_ruta.melt(id_vars='Ruta', value_vars=['pct_parcial', 'pct_total'],
                                    var_name='Tipo', value_name='pct')
             df_melt['Tipo'] = df_melt['Tipo'].replace({'pct_parcial': 'Parcial', 'pct_total': 'Total'})
             
             fig_ruta = px.bar(
                 df_melt, 
-                x='Responsable', y='pct', color='Tipo',
+                x='Ruta', y='pct', color='Tipo',
                 color_discrete_map={'Parcial': '#FF9800', 'Total': '#C62828'},
                 text_auto='.1f',
                 barmode='stack',
-                category_orders={'Responsable': df_ruta.sort_values('pct_sum', ascending=False)['Responsable'].tolist()}
+                category_orders={'Ruta': df_ruta.sort_values('pct_sum', ascending=False)['Ruta'].tolist()}
             )
             fig_ruta.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -437,14 +443,13 @@ def main():
 
     with col_c4:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        col_to_graph = col_empresa if col_empresa else ('Responsable' if 'Responsable' in df.columns else None)
-        if col_to_graph and 'Responsable' in df.columns and 'CRechazado' in df.columns:
-            st.markdown(f"#### Relación {col_to_graph} y Responsable")
-            df_resp = df.groupby([col_to_graph, 'Responsable'])['CRechazado'].sum().reset_index()
+        if col_empresa and 'Ruta' in df.columns and 'CRechazado' in df.columns:
+            st.markdown(f"#### Relación {col_empresa} y BK")
+            df_resp = df.groupby([col_empresa, 'Ruta'])['CRechazado'].sum().reset_index()
             df_resp = df_resp[df_resp['CRechazado'] > 0]
             fig_tree = px.treemap(
                 df_resp, 
-                path=[px.Constant("Empresas"), col_to_graph, 'Responsable'], 
+                path=[px.Constant("Empresas"), col_empresa, 'Ruta'], 
                 values='CRechazado',
                 color='CRechazado',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
