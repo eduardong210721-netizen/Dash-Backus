@@ -372,31 +372,46 @@ def main():
 
     with col_c2:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Distribución de Motivos (vs Total Pedidos)")
+        st.markdown("#### Top 5 Motivos de Rechazo")
         if 'Motivo No Entregado' in df.columns and 'CRechazado' in df.columns:
             df_motivo = df.groupby('Motivo No Entregado')['CRechazado'].sum().reset_index()
             total_ped = total_c_creado if total_c_creado > 0 else 1
-            df_motivo['pct_total'] = (df_motivo['CRechazado'] / total_ped * 100).round(1)
-            df_motivo['label'] = df_motivo['CRechazado'].astype(str) + ' (' + df_motivo['pct_total'].astype(str) + '%)'
+            df_motivo['% del Total'] = (df_motivo['CRechazado'] / total_ped * 100).round(2)
+            df_motivo = df_motivo.sort_values('CRechazado', ascending=False)
+            
+            # Top 5 for pie
+            df_top5 = df_motivo.head(5).copy()
+            df_rest = df_motivo.iloc[5:].copy()
+            
             fig_pie = px.pie(
-                df_motivo, 
+                df_top5, 
                 names='Motivo No Entregado', values='CRechazado', 
                 color_discrete_sequence=THEME_COLORS,
-                hole=0.4
+                hole=0.45
             )
             fig_pie.update_traces(
-                textinfo='label+percent',
-                hovertemplate='%{label}: %{value:,.0f} pedidos<br>%{customdata[0]:.1f}% del total',
-                customdata=df_motivo[['pct_total']].values
+                textinfo='label+value',
+                textposition='outside',
+                hovertemplate='%{label}<br>Rechazos: %{value:,.0f}<br>% del Total: %{customdata[0]:.2f}%',
+                customdata=df_top5[['% del Total']].values
             )
             fig_pie.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#e2e8f0'),
-                margin=dict(l=10, r=10, t=10, b=10),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
+                font=dict(color='#e2e8f0', size=10),
+                margin=dict(l=5, r=5, t=5, b=5),
+                showlegend=False,
+                height=280
             )
             st.plotly_chart(fig_pie, use_container_width=True)
+            
+            # Rest as table
+            if not df_rest.empty:
+                st.markdown("##### Otros Motivos")
+                df_rest_disp = df_rest[['Motivo No Entregado', 'CRechazado', '% del Total']].rename(
+                    columns={'Motivo No Entregado': 'Motivo', 'CRechazado': 'Rechazos'}
+                ).reset_index(drop=True)
+                st.dataframe(df_rest_disp, use_container_width=True, hide_index=True, height=150)
         st.markdown('</div>', unsafe_allow_html=True)
         
     
@@ -494,13 +509,13 @@ def main():
             if 'NombreCliente' in df_map.columns: hover_dict["NombreCliente"] = True
             elif 'Nombre' in df_map.columns: hover_dict["Nombre"] = True
             if 'Motivo No Entregado' in df_map.columns: hover_dict["Motivo No Entregado"] = True
-            if 'Responsable' in df_map.columns: hover_dict["Responsable"] = True
+            if 'Ruta' in df_map.columns: hover_dict["Ruta"] = True
             if 'Empresario' in df_map.columns: hover_dict["Empresario"] = True
             
             if 'Distrito' in df_map.columns: hover_dict["Distrito"] = True
             
-            # Color by Distrito if available, otherwise Responsable
-            color_col = 'Distrito' if 'Distrito' in df_map.columns else ('Responsable' if 'Responsable' in df_map.columns else None)
+            # Color by Distrito if available, otherwise Ruta
+            color_col = 'Distrito' if 'Distrito' in df_map.columns else ('Ruta' if 'Ruta' in df_map.columns else None)
             hover_name = 'NombreCliente' if 'NombreCliente' in df_map.columns else ('CodigoCliente' if 'CodigoCliente' in df_map.columns else None)
 
             fig_map = px.scatter_mapbox(
