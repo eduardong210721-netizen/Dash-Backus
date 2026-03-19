@@ -107,15 +107,18 @@ def load_data():
     for col in ['CCreado', 'CRechazado', 'CRechazadoParcial', 'CRechazadoTotal']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+    
+    # Override CRechazado with the real sum of Parcial + Total
+    if 'CRechazadoParcial' in df.columns and 'CRechazadoTotal' in df.columns:
+        df['CRechazado'] = df['CRechazadoParcial'] + df['CRechazadoTotal']
             
-    # Keep legacy 'Cajas' mapping if applicable, otherwise default to CRechazado for impact 
-    if 'Cajas' not in df.columns and 'CRechazado' in df.columns:
+    # Keep legacy 'Cajas' mapping
+    if 'CRechazado' in df.columns:
         df['Cajas'] = df['CRechazado']
-    else:
-        # Fallback if neither exist (unlikely in DATA sheet)
-        if 'Cajas' not in df.columns:
-            df['Cajas'] = 1
+    elif 'Cajas' in df.columns:
         df['Cajas'] = pd.to_numeric(df['Cajas'], errors='coerce').fillna(0).round(0).astype(int)
+    else:
+        df['Cajas'] = 0
     
     # Capacidad Camión as categorical string
     if 'Capacidad Camión' in df.columns:
