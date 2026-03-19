@@ -22,12 +22,12 @@ st.markdown("""
     text-align: center;
     padding: 1rem 0;
     margin-bottom: 1rem;
-    border-bottom: 2px solid #FDB913;
+    border-bottom: 2px solid #745CDB;
 }
 .main-title h1 {
     font-size: 1.7rem;
     font-weight: 800;
-    color: #FDB913;
+    color: #9CA5E1;
     margin: 0;
 }
 .main-title p {
@@ -46,8 +46,8 @@ st.markdown("""
 }
 .kpi-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 8px 25px rgba(253, 185, 19, 0.15);
-    border-color: #FDB913;
+    box-shadow: 0 8px 25px rgba(116, 92, 219, 0.25);
+    border-color: #745CDB;
 }
 .kpi-value {
     font-size: 1.7rem;
@@ -74,55 +74,69 @@ st.markdown("""
 
 # Colors specified by the user
 THEME_COLORS = [
-    "#FDB913", # Color 1 (Principal)
-    "#E5B611", # Color 7 (Mostaza corporativo)
-    "#FFD700", # Color 3 (Dorado brillante)
-    "#FBC02D", # Color 5 (Amarillo ámbar)
-    "#D4AF37", # Color 8 (Dorado metálico)
-    "#B8860B", # Color 4 (Dorado oscuro/ocre)
-    "#333333", # Color 6 (Gris carbón)
-    "#000000"  # Color 2 (Negro puro)
+    "#745CDB", # Color 2 (Morado principal vibrante)
+    "#5C95DB", # Color 1 (Azul claro/celeste)
+    "#9E5CDB", # Color 4 (Morado brillante)
+    "#5C6DDB", # Color 3 (Azul rey/índigo)
+    "#9CA5E1"  # Color 5 (Lila pastel/grisáceo)
 ]
 
 KPI_COLORS = {
     "Negativo": "#C62828",
     "Positivo": "#2E7D32",
-    "Neutro": "#FBC02D"
+    "Neutro": "#9CA5E1"
 }
 
 DIVERGENT_COLORS = [
-    [0.0, "#FFFDE7"], # Mínimo
-    [0.5, "#FFEB3B"], # Centro
-    [1.0, "#F57F17"]  # Máximo
+    [0.0, "#eef2fb"], # Mínimo (Azul muy claro)
+    [0.5, "#9CA5E1"], # Centro (Lila)
+    [1.0, "#745CDB"]  # Máximo (Morado fuerte)
 ]
 
 # ─────────────────────── DATA LOADING ───────────────────────
-@st.cache_data
 def load_data():
-    file_path = "RECHAZOS/DATA2.xlsx"
+    file_path = "RECHAZOS/DATA3.xlsx"
     if not os.path.exists(file_path):
         return None
-    df = pd.read_excel(file_path)
+    df = pd.read_excel(file_path, sheet_name="DATA")
     
     # Handle column stripping
     df.columns = df.columns.astype(str).str.strip()
     
-    # Ensure 'Ruta' and 'Motivo No Entregado', 'Cajas' exist
-    if 'Cajas' not in df.columns:
-        df['Cajas'] = 1 # Fallback if missing
-        
-    # Strictly round Cajas to whole integers
-    df['Cajas'] = pd.to_numeric(df['Cajas'], errors='coerce').fillna(0).round(0).astype(int)
+    # Strictly numeric tracking for new columns
+    for col in ['CCreado', 'CRechazado']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+            
+    # Keep legacy 'Cajas' mapping if applicable, otherwise default to CRechazado for impact 
+    if 'Cajas' not in df.columns and 'CRechazado' in df.columns:
+        df['Cajas'] = df['CRechazado']
+    else:
+        # Fallback if neither exist (unlikely in DATA sheet)
+        if 'Cajas' not in df.columns:
+            df['Cajas'] = 1
+        df['Cajas'] = pd.to_numeric(df['Cajas'], errors='coerce').fillna(0).round(0).astype(int)
     
     # Safe float conversion for geocoordinates
-    if 'LATITUD' in df.columns:
+    if 'Latitud' in df.columns:
+        df['LATITUD'] = pd.to_numeric(df['Latitud'].astype(str).str.replace(',', '.'), errors='coerce')
+    elif 'LATITUD' in df.columns:
         df['LATITUD'] = pd.to_numeric(df['LATITUD'].astype(str).str.replace(',', '.'), errors='coerce')
-    if 'LONGITUD' in df.columns:
+        
+    if 'Longitud' in df.columns:
+        df['LONGITUD'] = pd.to_numeric(df['Longitud'].astype(str).str.replace(',', '.'), errors='coerce')
+    elif 'LONGITUD' in df.columns:
         df['LONGITUD'] = pd.to_numeric(df['LONGITUD'].astype(str).str.replace(',', '.'), errors='coerce')
         
     # Standardize empty strings
-    if 'Ruta' in df.columns:
+    if 'Responsable' in df.columns:
+        df['Ruta'] = df['Responsable'].fillna('SIN RUTA').astype(str)
+    elif 'Ruta' in df.columns:
         df['Ruta'] = df['Ruta'].fillna('SIN RUTA').astype(str)
+        
+    # Standardize Motivos
+    if 'Motivos Rechazos' in df.columns and 'Motivo No Entregado' not in df.columns:
+        df['Motivo No Entregado'] = df['Motivos Rechazos'].fillna('Sin Motivo').astype(str)
         
     return df
 
@@ -175,6 +189,10 @@ def main():
         if rutas:
             df_filtered = df_filtered[df_filtered[col_ruta].astype(str).isin(rutas)]
             
+    col_capacidad = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
+    col_distrito = 'Distrito' if 'Distrito' in df.columns else None
+    col_tipo_rechazo = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df.columns else None
+    
     if 'Cliente' in df.columns:
         clientes = st.sidebar.multiselect("👤 Código Cliente", options=sorted(df_filtered['Cliente'].dropna().astype(str).unique()))
         if clientes:
@@ -185,73 +203,95 @@ def main():
         if motivos:
             df_filtered = df_filtered[df_filtered['Motivo No Entregado'].astype(str).isin(motivos)]
             
+    if col_capacidad:
+        capacidades = st.sidebar.multiselect("⚖️ Capacidad Camión", options=sorted(df_filtered[col_capacidad].dropna().astype(str).unique()))
+        if capacidades:
+            df_filtered = df_filtered[df_filtered[col_capacidad].astype(str).isin(capacidades)]
+            
+    if col_distrito:
+        distritos = st.sidebar.multiselect("🏙️ Distrito", options=sorted(df_filtered[col_distrito].dropna().astype(str).unique()))
+        if distritos:
+            df_filtered = df_filtered[df_filtered[col_distrito].astype(str).isin(distritos)]
+            
+    if col_tipo_rechazo:
+        tipos_rechazo = st.sidebar.multiselect("❌ Tipo de Rechazo", options=sorted(df_filtered[col_tipo_rechazo].dropna().astype(str).unique()))
+        if tipos_rechazo:
+            df_filtered = df_filtered[df_filtered[col_tipo_rechazo].astype(str).isin(tipos_rechazo)]
+            
     df = df_filtered
 
     if df.empty:
         st.warning("⚠️ No hay datos para los filtros seleccionados.")
         return
 
-    # Basic metrics
-    total_rechazos = len(df)
-    total_cajas = df['Cajas'].sum()
+    # ── METRIC CALCULATIONS (% RELATIVE) ──
+    total_c_creado = df['CCreado'].sum() if 'CCreado' in df.columns else len(df)
+    total_c_rechazado = df['CRechazado'].sum() if 'CRechazado' in df.columns else df['Cajas'].sum()
     
+    porcentaje_rechazo = (total_c_rechazado / total_c_creado * 100) if total_c_creado > 0 else 0
+    
+    # Calculate Peor BK based on % relative
     ruta_critica = "N/A"
-    motivo_principal = "N/A"
-    
-    if 'Ruta' in df.columns and not df.empty:
-        top_ruta = df.groupby('Ruta')['Cajas'].sum().idxmax()
-        ruta_critica = str(top_ruta)
-        
-    if 'Motivo No Entregado' in df.columns and not df.empty:
-        top_motivo = df.groupby('Motivo No Entregado')['Cajas'].sum().idxmax()
-        motivo_principal = str(top_motivo)
-        
-    peor_empresario = "N/A"
-    if col_empresa and not df.empty:
-        top_emp = df.groupby(col_empresa)['Cajas'].sum().idxmax()
-        peor_empresario = str(top_emp)
+    ruta_critica_val = ""
+    if 'Ruta' in df.columns and 'CCreado' in df.columns and not df.empty:
+        df_rutas = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+        df_rutas = df_rutas[df_rutas['CCreado'] > 0]
+        if not df_rutas.empty:
+            df_rutas['pct'] = df_rutas['CRechazado'] / df_rutas['CCreado'] * 100
+            ruta_critica = str(df_rutas['pct'].idxmax())
+            ruta_critica_val = f" ({df_rutas['pct'].max():.1f}%)"
+            
+    # Peor Empresario by % relative
+    emp_corto = "N/A"
+    emp_val = ""
+    if col_empresa and 'CCreado' in df.columns and not df.empty:
+        df_emp = df.groupby(col_empresa).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+        df_emp = df_emp[df_emp['CCreado'] > 0]
+        if not df_emp.empty:
+            df_emp['pct'] = df_emp['CRechazado'] / df_emp['CCreado'] * 100
+            emp_corto = str(df_emp['pct'].idxmax())
+            emp_val = f" ({df_emp['pct'].max():.1f}%)"
 
     # ── KPI ROW ──
     col1, col2, col3, col4, col5 = st.columns(5)
+    
     with col1:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {KPI_COLORS['Negativo']}">{total_rechazos:,}</div>
-            <div class="kpi-label">Total Órdenes Fallidas</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[1]}">{total_c_creado:,.0f}</div>
+            <div class="kpi-label">Total Pedidos Despachados</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col2:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {KPI_COLORS['Neutro']}">{total_cajas:,.0f}</div>
-            <div class="kpi-label">Total Cajas Impactadas</div>
-        </div>
-        ''', unsafe_allow_html=True)
-
-    with col3:
-        st.markdown(f'''
-        <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{ruta_critica}</div>
-            <div class="kpi-label">BK Más Crítico</div>
+            <div class="kpi-value" style="color: {KPI_COLORS['Negativo']}">{total_c_rechazado:,.0f}</div>
+            <div class="kpi-label">Pedidos Rechazados</div>
         </div>
         ''', unsafe_allow_html=True)
         
-    with col4:
-        emp_corto = peor_empresario
+    with col3:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[4]}; font-size: 0.95rem;">{emp_corto}</div>
-            <div class="kpi-label">Empresa con Más Rechazos</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{porcentaje_rechazo:.1f}%</div>
+            <div class="kpi-label">% Rechazo Global</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+    with col4:
+        st.markdown(f'''
+        <div class="kpi-card">
+            <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.2rem; margin-top: 10px;">{ruta_critica}{ruta_critica_val}</div>
+            <div class="kpi-label">BK Más Crítico (% Relativo)</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col5:
-        motivo_corto = motivo_principal[:20] + "..." if len(motivo_principal) > 20 else motivo_principal
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[1]}; font-size: 1.3rem; margin-top: 10px;">{motivo_corto}</div>
-            <div class="kpi-label">Motivo Principal</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[3]}; font-size: 1.1rem; margin-top: 10px;">{emp_corto}{emp_val}</div>
+            <div class="kpi-label">Peor Empresa (% Relativo)</div>
         </div>
         ''', unsafe_allow_html=True)
 
@@ -262,15 +302,18 @@ def main():
     
     with col_c1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 15 BKs con Mayor Impacto (Cajas)")
-        if 'Ruta' in df.columns:
-            df_ruta = df.groupby('Ruta')['Cajas'].sum().reset_index().sort_values('Cajas', ascending=False).head(15)
+        st.markdown("#### Top 10 BKs (% de Rechazo)")
+        if 'Ruta' in df.columns and 'CCreado' in df.columns:
+            df_ruta = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+            df_ruta = df_ruta[df_ruta['CCreado'] > 0]
+            df_ruta['pct'] = df_ruta['CRechazado'] / df_ruta['CCreado'] * 100
+            df_ruta = df_ruta.reset_index().sort_values('pct', ascending=False).head(10)
             fig_ruta = px.bar(
                 df_ruta, 
-                x='Ruta', y='Cajas', 
-                color='Cajas',
+                x='Ruta', y='pct', 
+                color='pct',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
-                text_auto='.0f'
+                text_auto='.1f'
             )
             fig_ruta.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -279,17 +322,18 @@ def main():
                 margin=dict(l=20, r=20, t=10, b=20),
                 coloraxis_showscale=False
             )
+            fig_ruta.update_yaxes(title_text="% Rechazado")
             st.plotly_chart(fig_ruta, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_c2:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Distribución de Motivos (%)")
-        if 'Motivo No Entregado' in df.columns:
-            df_motivo = df.groupby('Motivo No Entregado')['Cajas'].sum().reset_index()
+        st.markdown("#### Distribución de Motivos")
+        if 'Motivo No Entregado' in df.columns and 'CRechazado' in df.columns:
+            df_motivo = df.groupby('Motivo No Entregado')['CRechazado'].sum().reset_index()
             fig_pie = px.pie(
                 df_motivo, 
-                names='Motivo No Entregado', values='Cajas', 
+                names='Motivo No Entregado', values='CRechazado', 
                 color_discrete_sequence=THEME_COLORS,
                 hole=0.4
             )
@@ -308,36 +352,43 @@ def main():
     
     with col_c3:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 10 BKs con Más Eventos (Rechazos)")
-        if 'Ruta' in df.columns:
-            df_eventos = df.groupby('Ruta').size().reset_index(name='Eventos').sort_values('Eventos', ascending=True).tail(10)
-            fig_eventos = px.bar(
-                df_eventos, 
-                y='Ruta', x='Eventos', 
+        st.markdown("#### Impacto por Capacidad de Camión (%)")
+        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
+        if col_cap and 'CCreado' in df.columns:
+            df_cap = df.groupby(col_cap).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+            df_cap = df_cap[df_cap['CCreado'] > 0]
+            df_cap['pct'] = df_cap['CRechazado'] / df_cap['CCreado'] * 100
+            df_cap = df_cap.reset_index().sort_values('pct', ascending=True)
+                
+            fig_cap = px.bar(
+                df_cap, 
+                y=col_cap, x='pct', 
                 orientation='h',
                 color_discrete_sequence=[THEME_COLORS[2]],
-                text_auto=True
+                text_auto='.1f'
             )
-            fig_eventos.update_layout(
+            fig_cap.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
                 font=dict(color='#e2e8f0'),
                 margin=dict(l=20, r=20, t=10, b=20)
             )
-            st.plotly_chart(fig_eventos, use_container_width=True)
+            fig_cap.update_xaxes(title_text="% Rechazado")
+            st.plotly_chart(fig_cap, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_c4:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         col_to_graph = col_empresa if col_empresa else ('Responsable' if 'Responsable' in df.columns else None)
-        if col_to_graph and 'Ruta' in df.columns:
+        if col_to_graph and 'Ruta' in df.columns and 'CRechazado' in df.columns:
             st.markdown(f"#### Relación {col_to_graph} y BK")
-            df_resp = df.groupby([col_to_graph, 'Ruta'])['Cajas'].sum().reset_index()
+            df_resp = df.groupby([col_to_graph, 'Ruta'])['CRechazado'].sum().reset_index()
+            df_resp = df_resp[df_resp['CRechazado'] > 0]
             fig_tree = px.treemap(
                 df_resp, 
                 path=[px.Constant("Empresas"), col_to_graph, 'Ruta'], 
-                values='Cajas',
-                color='Cajas',
+                values='CRechazado',
+                color='CRechazado',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
             )
             fig_tree.update_layout(
@@ -351,20 +402,20 @@ def main():
     if col_empresa:
         st.markdown("### 🏢 Análisis Resumen de Empresa de Transporte")
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Matriz de Motivos por Empresario (Cajas Impactadas)")
-        if 'Motivo No Entregado' in df.columns:
+        st.markdown("#### Tipo de Rechazo por Empresario (Total Despachado vs Fallido)")
+        col_tr = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df.columns else ('Motivo No Entregado' if 'Motivo No Entregado' in df.columns else None)
+        if col_tr and 'CRechazado' in df.columns:
             pivot_emp = pd.pivot_table(
                 df, 
-                values='Cajas', 
+                values='CRechazado', 
                 index=col_empresa, 
-                columns='Motivo No Entregado', 
+                columns=col_tr, 
                 aggfunc='sum', 
                 fill_value=0,
                 margins=True,
                 margins_name='TOTAL GENERAL'
             )
-            # Apply corporate yellow/gold background gradient highlighting where impact is highest
-            styled_table = pivot_emp.style.format("{:.0f}").background_gradient(cmap="YlOrBr", axis=None, vmin=0)
+            styled_table = pivot_emp.style.format("{:.0f}").background_gradient(cmap="Purples", axis=None, vmin=0)
             st.dataframe(styled_table, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -373,14 +424,16 @@ def main():
         st.markdown("### 🗺️ Mapa de Calor y Zonas Críticas")
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         # Filter rows with valid coordinates
-        df_map = df.dropna(subset=['LATITUD', 'LONGITUD', 'Ruta', 'Cajas'])
-        df_map = df_map[df_map['Cajas'] > 0]
+        df_map = df.dropna(subset=['LATITUD', 'LONGITUD', 'Ruta', 'CRechazado'])
+        df_map = df_map[df_map['CRechazado'] > 0]
         
         if not df_map.empty:
-            hover_dict = {"LATITUD": False, "LONGITUD": False, "Cajas": True}
+            hover_dict = {"LATITUD": False, "LONGITUD": False, "CRechazado": True, "Cajas": False}
             if 'Nombre' in df_map.columns: hover_dict["Nombre"] = True
             if 'Motivo No Entregado' in df_map.columns: hover_dict["Motivo No Entregado"] = True
             if 'UNIDAD DE NEGOCIO FINAL' in df_map.columns: hover_dict["UNIDAD DE NEGOCIO FINAL"] = True
+            
+            if 'Distrito' in df_map.columns: hover_dict["Distrito"] = True
             
             if 'Cliente' in df_map.columns:
                 hover_name = 'Cliente'
@@ -392,7 +445,7 @@ def main():
                 lat="LATITUD", 
                 lon="LONGITUD",     
                 color="Ruta", 
-                size="Cajas",
+                size="CRechazado",
                 hover_name=hover_name, 
                 hover_data=hover_dict,
                 color_discrete_sequence=THEME_COLORS * 5, # repeating to avoid running out of colors
@@ -415,25 +468,31 @@ def main():
     
     with col_t1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 10 Clientes más Críticos (Cajas)")
+        st.markdown("#### Top 10 Clientes con Mayor Impacto (% Relativo)")
         
         # Safe merge for display
-        if 'Cliente' in df.columns and 'Nombre' in df.columns:
+        if 'Cliente' in df.columns and 'NombreCliente' in df.columns:
+            df['Cliente_Disp'] = df['Cliente'].astype(str) + " - " + df['NombreCliente'].astype(str).str[:20]
+        elif 'Cliente' in df.columns and 'Nombre' in df.columns:
             df['Cliente_Disp'] = df['Cliente'].astype(str) + " - " + df['Nombre'].astype(str).str[:20]
         elif 'Cliente' in df.columns:
             df['Cliente_Disp'] = df['Cliente'].astype(str)
         else:
             df['Cliente_Disp'] = None
             
-        if 'Cliente_Disp' in df.columns and df['Cliente_Disp'].notnull().any():
-            df_cli = df.groupby('Cliente_Disp')['Cajas'].sum().reset_index().sort_values('Cajas', ascending=True).tail(10)
+        if 'Cliente_Disp' in df.columns and df['Cliente_Disp'].notnull().any() and 'CRechazado' in df.columns and 'CCreado' in df.columns:
+            df_cli = df.groupby('Cliente_Disp').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
+            df_cli = df_cli[df_cli['CCreado'] > 0]
+            df_cli['pct'] = df_cli['CRechazado'] / df_cli['CCreado'] * 100
+            df_cli = df_cli.reset_index().sort_values('pct', ascending=True).tail(10)
+            
             fig_cli = px.bar(
                 df_cli, 
-                y='Cliente_Disp', x='Cajas', 
+                y='Cliente_Disp', x='pct', 
                 orientation='h',
-                color='Cajas',
+                color='pct',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
-                text_auto='.0f'
+                text_auto='.1f'
             )
             fig_cli.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -443,6 +502,7 @@ def main():
                 coloraxis_showscale=False
             )
             fig_cli.update_yaxes(title_text="")
+            fig_cli.update_xaxes(title_text="% Rechazado")
             st.plotly_chart(fig_cli, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -451,12 +511,12 @@ def main():
         st.markdown("#### Tendencia de Motivos por Cliente")
         if 'Motivo No Entregado' in df.columns and 'Cliente_Disp' in df.columns and df['Cliente_Disp'].notnull().any():
             top_clientes = df_cli['Cliente_Disp'].tolist()
-            df_cli_motivo = df.groupby(['Cliente_Disp', 'Motivo No Entregado'])['Cajas'].sum().reset_index()
+            df_cli_motivo = df.groupby(['Cliente_Disp', 'Motivo No Entregado'])['CRechazado'].sum().reset_index()
             df_cli_motivo = df_cli_motivo[df_cli_motivo['Cliente_Disp'].isin(top_clientes)]
             
             fig_cli_mot = px.bar(
                 df_cli_motivo,
-                x='Cajas', y='Cliente_Disp',
+                x='CRechazado', y='Cliente_Disp',
                 orientation='h',
                 color='Motivo No Entregado',
                 color_discrete_sequence=THEME_COLORS,
@@ -470,6 +530,7 @@ def main():
                 legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5)
             )
             fig_cli_mot.update_yaxes(title_text="")
+            fig_cli_mot.update_xaxes(title_text="Total Rechazado")
             st.plotly_chart(fig_cli_mot, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 

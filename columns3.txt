@@ -1,0 +1,14 @@
+SHEETS: DISPONIBILIDAD, HELIO, DATA, MAESTRO_CLIENTES
+
+--- DISPONIBILIDAD ---
+RUTA, ZONAS, Empresa, Cod. Conductor, Placa, Capac., Marca, PROPIETARIO, PESO KG, Status
+
+--- HELIO ---
+Fecha, Ruta, Cliente, PedidoSAP, Nombre, Motivo No Entregado, Unidad Negocio, Responsable, Eventos, Cajas, Supervisor, LATITUD, LONGITUD, EMPRESARIO, Distrito, Capacidad
+
+--- DATA ---
+FechaVDOT, DocumentoPedido, CodigoCliente, Division, Gerencia, NombreCliente, Unidad de Negocio, FechaAlta, Cliente Nuevo, CodigoZonaVenta, CodCentro, BEES, Centro, ClaseDocumento, RegionalDistribucion, ResponsablePedido, Supervision, TipoPedido, CCreado, CAnuladoParcial, CAnuladoTotal, CPlan, CNoPlan, PIF, CRechazado, CRechazadoParcial, CRechazadoTotal, Motivos Rechazos, Responsable, Empresario, Capacidad Camión, Distrito, Latitud, Longitud, Tipo de Rechazo
+
+--- MAESTRO_CLIENTES ---
+cliente_id, nombre, direccion_geo, distrito, telefono, canal, zona_pem, supervisor, Latitud, Longitud
+
