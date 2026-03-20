@@ -729,28 +729,38 @@ def main():
         col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else None)
         
         if col_motivo and 'CRechazado' in df_rechazos.columns:
-            # Tomar Top 5 Supervisores con más rechazos
+            # Tomar Top 3 Supervisores con más rechazos
             df_sup_agg = df_rechazos.groupby(col_sup)['CRechazado'].sum().reset_index()
-            top_sups = df_sup_agg.sort_values('CRechazado', ascending=False).head(5)[col_sup].tolist()
+            top_sups = df_sup_agg.sort_values('CRechazado', ascending=False).head(3)[col_sup].tolist()
             
-            # Filtrar datos de rechazos solo para ese Top 5
+            # Filtrar datos de rechazos solo para ese Top 3
             df_sup_rech = df_rechazos[df_rechazos[col_sup].isin(top_sups)].copy()
             df_sup_rech = df_sup_rech.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
             df_sup_rech = df_sup_rech[df_sup_rech['CRechazado'] > 0]
             
-            fig_tree = px.treemap(
-                df_sup_rech, 
-                path=[px.Constant("Supervisores"), col_sup, col_motivo], 
-                values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
-            )
-            fig_tree.update_layout(
-                margin=dict(l=5, r=5, t=5, b=5), 
-                paper_bgcolor='rgba(0,0,0,0)', 
-                coloraxis_showscale=False,
-                height=500
+            # Graficar columnas agrupadas verticales
+            fig_bar = px.bar(
+                df_sup_rech,
+                x=col_sup,
+                y='CRechazado',
+                color=col_motivo,
+                barmode='group',
+                color_discrete_sequence=THEME_COLORS * 5,
+                text_auto='.0f'
             )
             
-            st.plotly_chart(fig_tree, use_container_width=True)
+            fig_bar.update_layout(
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='#e2e8f0', size=11),
+                margin=dict(l=10, r=10, t=20, b=10),
+                legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
+                height=500
+            )
+            fig_bar.update_xaxes(categoryorder='total descending', title_text="")
+            fig_bar.update_yaxes(title_text="Total Rechazos (Und)")
+            
+            st.plotly_chart(fig_bar, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     # ── DATA TABLE ──
