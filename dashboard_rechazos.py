@@ -470,8 +470,10 @@ def main():
             df_sup_cap = df_rechazos_cap.groupby([col_sup, col_cap])['CRechazado'].sum().reset_index()
             df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
             
-            # Ordenar por el total de rechazos
-            df_order = df_sup_cap.groupby(col_sup)['CRechazado'].sum().sort_values(ascending=False).index
+            # Filtrar al Top 5 Supervisores con más rechazos para este empresario
+            top5_sups = df_sup_cap.groupby(col_sup)['CRechazado'].sum().sort_values(ascending=False).head(5).index
+            df_sup_cap = df_sup_cap[df_sup_cap[col_sup].isin(top5_sups)]
+            df_order = top5_sups
             
             fig_cap = px.bar(
                 df_sup_cap, 
