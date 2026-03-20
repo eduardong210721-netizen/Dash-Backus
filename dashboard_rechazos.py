@@ -208,6 +208,11 @@ def main():
         if responsables:
             df_filtered = df_filtered[df_filtered[col_responsable].astype(str).isin(responsables)]
             
+    if col_sup:
+        supervisores = st.sidebar.multiselect("👔 Supervisor", options=sorted(df_filtered[col_sup].dropna().astype(str).unique()))
+        if supervisores:
+            df_filtered = df_filtered[df_filtered[col_sup].astype(str).isin(supervisores)]
+            
     col_capacidad = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
     col_distrito = 'Distrito' if 'Distrito' in df.columns else None
     col_tipo_rechazo = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df.columns else None
@@ -705,24 +710,16 @@ def main():
         if col_motivo and 'CRechazado' in df_rechazos.columns and 'CCreado' in df_filtered.columns:
             from plotly.subplots import make_subplots
             
-            # Calcular pedidos efectivos por supervisor para obtener un % real
-            df_sup_total = df_filtered.copy()
-            c_par = 'CAnuladoParcial' if 'CAnuladoParcial' in df_filtered.columns else None
-            c_tot = 'CAnuladoTotal' if 'CAnuladoTotal' in df_filtered.columns else None
-            df_sup_total['CEfectivo'] = df_sup_total['CCreado']
-            if c_par: df_sup_total['CEfectivo'] -= df_sup_total[c_par].fillna(0)
-            if c_tot: df_sup_total['CEfectivo'] -= df_sup_total[c_tot].fillna(0)
-            
-            df_sup_eff = df_sup_total.groupby(col_sup).agg({'CEfectivo': 'sum'}).reset_index()
+            # Calcular % del Total de Rechazos Global y tomar el Top 5
+            total_rechazos_global = df_rechazos['CRechazado'].sum()
             df_sup_rech = df_rechazos.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
             
             df_sup_agg = df_sup_rech.groupby(col_sup)['CRechazado'].sum().reset_index()
-            df_sup_merged = pd.merge(df_sup_agg, df_sup_eff, on=col_sup, how='left')
-            df_sup_merged['pct'] = (df_sup_merged['CRechazado'] / df_sup_merged['CEfectivo'] * 100).fillna(0).replace([float('inf'), -float('inf')], 0)
+            df_sup_merged = df_sup_agg.sort_values('CRechazado', ascending=False).head(5).copy()
+            df_sup_merged['pct'] = (df_sup_merged['CRechazado'] / total_rechazos_global * 100) if total_rechazos_global > 0 else 0
             
-            # Ordenar por volumen de rechazo
-            df_sup_merged = df_sup_merged.sort_values('CRechazado', ascending=False)
             top_sups_order = df_sup_merged[col_sup].tolist()
+            df_sup_rech = df_sup_rech[df_sup_rech[col_sup].isin(top_sups_order)]
             
             # Crear subplots doble eje
             fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
