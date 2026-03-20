@@ -679,11 +679,11 @@ def main():
                 else:
                     df_sup_cap = df_sup_cap[df_sup_cap[col_sup] == selected_sup]
                 
-                # Columnas agrupadas: x=Capacidad, y=Rechazos
+                # Columnas apiladas: x=Supervisor, y=Rechazos, color=Capacidad
                 fig_s2 = px.bar(
                     df_sup_cap, 
-                    x=col_cap_c, y='CRechazado', color=col_sup, 
-                    barmode='group', color_discrete_sequence=THEME_COLORS*5,
+                    x=col_sup, y='CRechazado', color=col_cap_c, 
+                    barmode='stack', color_discrete_sequence=THEME_COLORS*5,
                     text_auto='.0f'
                 )
                 fig_s2.update_layout(
@@ -693,7 +693,7 @@ def main():
                     legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
                 )
                 fig_s2.update_yaxes(title_text="Total Rechazos")
-                fig_s2.update_xaxes(title_text="Capacidad Camión", type='category')
+                fig_s2.update_xaxes(title_text="", categoryorder='total descending')
                 st.plotly_chart(fig_s2, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
