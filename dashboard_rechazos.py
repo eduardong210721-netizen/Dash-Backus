@@ -434,13 +434,14 @@ def main():
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
         
-        if col_empresa and 'Ruta' in df_rechazos.columns and 'CRechazado' in df_rechazos.columns:
-            st.markdown(f"#### Relación {col_empresa} y BK")
-            df_resp = df_rechazos.groupby([col_empresa, 'Ruta'])['CRechazado'].sum().reset_index()
+        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
+        if col_empresa and col_cap and 'CRechazado' in df_rechazos.columns:
+            st.markdown(f"#### Relación Empresario y Capacidad de Camión")
+            df_resp = df_rechazos.groupby([col_empresa, col_cap])['CRechazado'].sum().reset_index()
             df_resp = df_resp[df_resp['CRechazado'] > 0]
             fig_tree = px.treemap(
                 df_resp, 
-                path=[px.Constant("Empresas"), col_empresa, 'Ruta'], 
+                path=[px.Constant("Empresas"), col_empresa, col_cap], 
                 values='CRechazado',
                 color='CRechazado',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
@@ -505,7 +506,7 @@ def main():
                 hover_name=hover_name, 
                 hover_data=hover_dict,
                 color_discrete_sequence=THEME_COLORS * 5,
-                size_max=20, 
+                size_max=8, 
                 zoom=10,
                 mapbox_style="carto-darkmatter"
             )
