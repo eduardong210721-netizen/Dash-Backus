@@ -523,21 +523,35 @@ def main():
         df_map = df_map[df_map['CRechazado'] > 0]
         
         if not df_map.empty:
-            hover_dict = {"LATITUD": False, "LONGITUD": False, "CRechazado": True, "Cajas": False}
-            if 'NombreCliente' in df_map.columns: hover_dict["NombreCliente"] = True
-            elif 'Nombre' in df_map.columns: hover_dict["Nombre"] = True
-            if 'Motivo No Entregado' in df_map.columns: hover_dict["Motivo No Entregado"] = True
-            if 'Ruta' in df_map.columns: hover_dict["Ruta"] = True
-            if 'Empresario' in df_map.columns: hover_dict["Empresario"] = True
-            
-            if 'Distrito' in df_map.columns: hover_dict["Distrito"] = True
-            
-            # Color by Distrito if available, otherwise Ruta
-            color_col = 'Distrito' if 'Distrito' in df_map.columns else ('Ruta' if 'Ruta' in df_map.columns else None)
             hover_name = 'NombreCliente' if 'NombreCliente' in df_map.columns else ('CodigoCliente' if 'CodigoCliente' in df_map.columns else None)
+            color_col = 'Distrito' if 'Distrito' in df_map.columns else ('Ruta' if 'Ruta' in df_map.columns else None)
+            
+            # Group by location and client to aggregate rejections properly
+            group_cols = ['LATITUD', 'LONGITUD']
+            if hover_name and hover_name in df_map.columns: group_cols.append(hover_name)
+            
+            agg_dict = {'CRechazado': 'sum'}
+            
+            # Collect categorical columns to keep for hover/color (taking the first occurrence per client)
+            cat_cols = []
+            if color_col and color_col in df_map.columns: cat_cols.append(color_col)
+            if 'Motivo No Entregado' in df_map.columns: cat_cols.append('Motivo No Entregado')
+            if 'Ruta' in df_map.columns: cat_cols.append('Ruta')
+            if 'Empresario' in df_map.columns: cat_cols.append('Empresario')
+            if 'Distrito' in df_map.columns: cat_cols.append('Distrito')
+            
+            for c in set(cat_cols) - set(group_cols):
+                agg_dict[c] = 'first'
+                
+            df_map_agg = df_map.groupby(group_cols, dropna=False).agg(agg_dict).reset_index()
+            
+            # Define hover dictionary based on available columns in aggregated dataframe
+            hover_dict = {"LATITUD": False, "LONGITUD": False, "CRechazado": True}
+            for c in set(cat_cols):
+                hover_dict[c] = True
 
             fig_map = px.scatter_mapbox(
-                df_map, 
+                df_map_agg, 
                 lat="LATITUD", 
                 lon="LONGITUD",     
                 color=color_col, 
@@ -545,7 +559,7 @@ def main():
                 hover_name=hover_name, 
                 hover_data=hover_dict,
                 color_discrete_sequence=THEME_COLORS * 5,
-                size_max=8, 
+                size_max=12,  # slightly increased size max to visualize the differences better
                 zoom=10,
                 mapbox_style="carto-darkmatter"
             )
