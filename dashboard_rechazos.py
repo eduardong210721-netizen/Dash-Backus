@@ -457,35 +457,38 @@ def main():
 
     with col_c3:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Rechazo por Capacidad de Camión")
+        st.markdown("#### Supervisor vs Capacidad de Camión")
         df_rechazos_cap = df_filtered[df_filtered['CRechazado'] > 0].copy()
         
         if selected_empresa != "Todos" and col_empresa:
             df_rechazos_cap = df_rechazos_cap[df_rechazos_cap[col_empresa] == selected_empresa]
         
         col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos_cap.columns else None
-        if col_cap and 'CRechazado' in df_rechazos_cap.columns:
-            df_cap = df_rechazos_cap.groupby(col_cap).agg({'CRechazado': 'sum'})
-            df_cap = df_cap[df_cap['CRechazado'] > 0]
-            df_cap = df_cap.reset_index().sort_values('CRechazado', ascending=True)
-                
+        col_sup = 'Supervisor' if 'Supervisor' in df_rechazos_cap.columns else ('Supervision' if 'Supervision' in df_rechazos_cap.columns else None)
+        
+        if col_cap and col_sup and 'CRechazado' in df_rechazos_cap.columns:
+            df_sup_cap = df_rechazos_cap.groupby([col_sup, col_cap])['CRechazado'].sum().reset_index()
+            df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
+            
+            # Ordenar por el total de rechazos
+            df_order = df_sup_cap.groupby(col_sup)['CRechazado'].sum().sort_values(ascending=False).index
+            
             fig_cap = px.bar(
-                df_cap, 
-                y=col_cap, x='CRechazado',
-                orientation='h',
-                color='CRechazado',
-                color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
+                df_sup_cap, 
+                x=col_sup, y='CRechazado', color=col_cap,
+                barmode='stack',
+                color_discrete_sequence=THEME_COLORS*5,
                 text_auto='.0f'
             )
             fig_cap.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#e2e8f0'),
+                font=dict(color='#e2e8f0', size=11),
                 margin=dict(l=20, r=20, t=10, b=20),
-                coloraxis_showscale=False
+                legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
             )
-            fig_cap.update_xaxes(title_text="Total Pedidos Rechazados")
-            fig_cap.update_yaxes(type='category', title_text="")
+            fig_cap.update_xaxes(title_text="", categoryorder='array', categoryarray=df_order)
+            fig_cap.update_yaxes(title_text="Total Pedidos Rechazados")
             st.plotly_chart(fig_cap, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
@@ -667,33 +670,43 @@ def main():
             
         with col_s1:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### Supervisor vs Capacidad de Camión")
-            col_cap_c = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
-            if col_cap_c:
-                df_sup_cap = df_rechazos.groupby([col_sup, col_cap_c])['CRechazado'].sum().reset_index()
-                df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
-                
+            st.markdown("#### Supervisor y Motivos de Rechazo")
+            col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else None)
+            
+            if col_motivo and 'CRechazado' in df_rechazos.columns:
+                # Filtrar según selección
                 if selected_sup == "Top 3":
-                    top_sups = df_sup_cap.groupby(col_sup)['CRechazado'].sum().nlargest(3).index
-                    df_sup_cap = df_sup_cap[df_sup_cap[col_sup].isin(top_sups)]
+                    df_sup_agg = df_rechazos.groupby(col_sup)['CRechazado'].sum().reset_index()
+                    target_sups = df_sup_agg.sort_values('CRechazado', ascending=False).head(3)[col_sup].tolist()
+                    df_sup_mot = df_rechazos[df_rechazos[col_sup].isin(target_sups)].copy()
                 else:
-                    df_sup_cap = df_sup_cap[df_sup_cap[col_sup] == selected_sup]
+                    df_sup_mot = df_rechazos[df_rechazos[col_sup] == selected_sup].copy()
                 
-                # Columnas apiladas: x=Supervisor, y=Rechazos, color=Capacidad
+                # Agrupar y preparar para la gráfica
+                df_sup_mot = df_sup_mot.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
+                df_sup_mot = df_sup_mot[df_sup_mot['CRechazado'] > 0]
+                
+                # Graficar columnas agrupadas verticales
                 fig_s2 = px.bar(
-                    df_sup_cap, 
-                    x=col_sup, y='CRechazado', color=col_cap_c, 
-                    barmode='stack', color_discrete_sequence=THEME_COLORS*5,
+                    df_sup_mot,
+                    x=col_sup,
+                    y='CRechazado',
+                    color=col_motivo,
+                    barmode='group',
+                    color_discrete_sequence=THEME_COLORS * 5,
                     text_auto='.0f'
                 )
+                
                 fig_s2.update_layout(
-                    margin=dict(l=10, r=10, t=20, b=10), 
-                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
                     font=dict(color='#e2e8f0', size=11),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+                    margin=dict(l=10, r=10, t=20, b=10),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
                 )
-                fig_s2.update_yaxes(title_text="Total Rechazos")
-                fig_s2.update_xaxes(title_text="", categoryorder='total descending')
+                fig_s2.update_xaxes(categoryorder='total descending', title_text="")
+                fig_s2.update_yaxes(title_text="Total Rechazos (Und)")
+                
                 st.plotly_chart(fig_s2, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -723,62 +736,6 @@ def main():
             st.dataframe(pivot_s3.style.format("{:.0f}"), use_container_width=True, height=400)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # 4. Gráfico: Supervisor y Motivos de Rechazo (Nivel 4)
-        col_m1, col_m2 = st.columns([3, 1])
-        col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else None)
-        
-        if col_motivo and 'CRechazado' in df_rechazos.columns:
-            with col_m2:
-                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-                st.markdown("#### Filtro Supervisor")
-                df_sup_motivo_base = df_rechazos.copy()
-                if col_sup and not df_sup_motivo_base.empty:
-                    sups_motivo_list = ["Top 3"] + sorted(df_sup_motivo_base[col_sup].dropna().astype(str).unique())
-                    selected_sup_motivo = st.radio("Seleccione Supervisor:", options=sups_motivo_list, key='radio_sup_motivo')
-                else:
-                    selected_sup_motivo = "Top 3"
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-            with col_m1:
-                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-                st.markdown("#### Supervisor y Motivos de Rechazo")
-                
-                # Filtrar según selección
-                if selected_sup_motivo == "Top 3":
-                    df_sup_agg = df_rechazos.groupby(col_sup)['CRechazado'].sum().reset_index()
-                    target_sups = df_sup_agg.sort_values('CRechazado', ascending=False).head(3)[col_sup].tolist()
-                    df_sup_rech = df_rechazos[df_rechazos[col_sup].isin(target_sups)].copy()
-                else:
-                    df_sup_rech = df_rechazos[df_rechazos[col_sup] == selected_sup_motivo].copy()
-                
-                # Agrupar y preparar para la gráfica
-                df_sup_rech = df_sup_rech.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
-                df_sup_rech = df_sup_rech[df_sup_rech['CRechazado'] > 0]
-                
-                # Graficar columnas agrupadas verticales
-                fig_bar = px.bar(
-                    df_sup_rech,
-                    x=col_sup,
-                    y='CRechazado',
-                    color=col_motivo,
-                    barmode='group',
-                    color_discrete_sequence=THEME_COLORS * 5,
-                    text_auto='.0f'
-                )
-                
-                fig_bar.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    font=dict(color='#e2e8f0', size=11),
-                    margin=dict(l=10, r=10, t=20, b=10),
-                    legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-                    height=500
-                )
-                fig_bar.update_xaxes(categoryorder='total descending', title_text="")
-                fig_bar.update_yaxes(title_text="Total Rechazos (Und)")
-                
-                st.plotly_chart(fig_bar, use_container_width=True)
-                st.markdown('</div>', unsafe_allow_html=True)
         
     # ── DATA TABLE ──
     st.markdown("### 📋 Detalle de Rechazos")
