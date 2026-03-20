@@ -275,8 +275,20 @@ def main():
             emp_corto = str(df_emp['CRechazado'].idxmax())
             emp_val = f" ({df_emp['CRechazado'].max():.0f})"
 
+    # Top Motivo
+    top_motivo = "N/A"
+    top_motivo_val = ""
+    col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else None)
+    if col_motivo and not df_rechazos.empty:
+        df_mot = df_rechazos.groupby(col_motivo).agg({'CRechazado': 'sum'})
+        if not df_mot.empty:
+            top_motivo = str(df_mot['CRechazado'].idxmax())
+            # Shorten if too long
+            top_motivo = top_motivo[:18] + "..." if len(top_motivo) > 18 else top_motivo
+            top_motivo_val = f" ({df_mot['CRechazado'].max():.0f})"
+
     # ── KPI ROW ──
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
     
     with col1:
         st.markdown(f'''
@@ -309,22 +321,24 @@ def main():
             <div class="kpi-label">% Rechazo Total</div>
         </div>
         ''', unsafe_allow_html=True)
-        st.markdown(f'''
-        <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{ruta_critica}{ruta_critica_val}</div>
-            <div class="kpi-label">BK Más Crítico</div>
-        </div>
-        ''', unsafe_allow_html=True)
         
     with col5:
         st.markdown(f'''
         <div class="kpi-card">
+            <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{top_motivo}{top_motivo_val}</div>
+            <div class="kpi-label">Top Motivo</div>
+        </div>
+        ''', unsafe_allow_html=True)
+        
+    with col6:
+        st.markdown(f'''
+        <div class="kpi-card">
             <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{ruta_critica}{ruta_critica_val}</div>
             <div class="kpi-label">BK Más Crítico</div>
         </div>
         ''', unsafe_allow_html=True)
         
-    with col6:
+    with col7:
         st.markdown(f'''
         <div class="kpi-card">
             <div class="kpi-value" style="color: {THEME_COLORS[3]}; font-size: 1.05rem; margin-top: 8px;">{emp_corto}{emp_val}</div>
@@ -381,14 +395,15 @@ def main():
             df_motivo = df_rechazos.groupby(col_motivo)['CRechazado'].sum().reset_index()
             total_ped = total_c_creado if total_c_creado > 0 else 1
             df_motivo['% del Total'] = (df_motivo['CRechazado'] / total_ped * 100).round(2)
-            df_motivo = df_motivo.sort_values('CRechazado', ascending=False)
-            
             # Top 5 for pie
             df_top5 = df_motivo.head(5).copy()
             df_rest = df_motivo.iloc[5:].copy()
             
+            df_top5_custom = df_top5.copy()
+            df_top5_custom['pct_str'] = df_top5_custom['% del Total'].apply(lambda x: f"{x:.2f}%")
+            
             fig_pie = px.pie(
-                df_top5, 
+                df_top5_custom, 
                 names=col_motivo, values='CRechazado', 
                 color_discrete_sequence=THEME_COLORS,
                 hole=0.45
@@ -397,7 +412,8 @@ def main():
                 textinfo='percent',
                 textposition='inside',
                 insidetextfont=dict(color='white', size=11),
-                hovertemplate='<b>%{label}</b><br>Rechazos: %{value:,.0f}<br>% del Total: %{customdata[0]:.2f}%'
+                customdata=df_top5_custom['pct_str'],
+                hovertemplate='<b>%{label}</b><br>Rechazos: %{value:,.0f}<br>% del Total: %{customdata}'
             )
             fig_pie.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -619,6 +635,57 @@ def main():
             fig_sup.update_xaxes(title_text="Total Rechazos")
             st.plotly_chart(fig_sup, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+    # NUEVA FILA: ANALISIS DE SUPERVISOR RELACIONES
+    if col_sup and 'CRechazado' in df_rechazos.columns:
+        st.markdown("### 📊 Análisis Detallado por Supervisor")
+        col_s1, col_s2, col_s3 = st.columns(3)
+        
+        with col_s1:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### Supervisor vs BK (Ruta)")
+            if 'Ruta' in df_rechazos.columns:
+                df_sup_bk = df_rechazos.groupby([col_sup, 'Ruta'])['CRechazado'].sum().reset_index()
+                df_sup_bk = df_sup_bk[df_sup_bk['CRechazado'] > 0]
+                fig_s1 = px.treemap(
+                    df_sup_bk, 
+                    path=[px.Constant("Supervisores"), col_sup, 'Ruta'], 
+                    values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
+                )
+                fig_s1.update_layout(margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
+                st.plotly_chart(fig_s1, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col_s2:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### Supervisor vs Capacidad de Camión")
+            col_cap_c = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
+            if col_cap_c:
+                df_sup_cap = df_rechazos.groupby([col_sup, col_cap_c])['CRechazado'].sum().reset_index()
+                df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
+                fig_s2 = px.treemap(
+                    df_sup_cap, 
+                    path=[px.Constant("Supervisores"), col_sup, col_cap_c], 
+                    values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
+                )
+                fig_s2.update_layout(margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
+                st.plotly_chart(fig_s2, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        with col_s3:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### Supervisor vs Empresario")
+            if col_empresa:
+                df_sup_emp = df_rechazos.groupby([col_sup, col_empresa])['CRechazado'].sum().reset_index()
+                df_sup_emp = df_sup_emp[df_sup_emp['CRechazado'] > 0]
+                fig_s3 = px.treemap(
+                    df_sup_emp, 
+                    path=[px.Constant("Supervisores"), col_sup, col_empresa], 
+                    values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
+                )
+                fig_s3.update_layout(margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
+                st.plotly_chart(fig_s3, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
     # ── CLIENT TRENDS ──
     st.markdown("### 🎯 Análisis de Tendencias por Cliente")
