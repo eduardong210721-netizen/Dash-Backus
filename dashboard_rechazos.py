@@ -703,79 +703,45 @@ def main():
             st.dataframe(pivot_s3.style.format("{:.0f}"), use_container_width=True, height=400)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # 4. Gráfico Combinado: Supervisor y Motivo de Rechazo (Nivel 4)
+        # 4. Gráfico: Supervisor y Motivos de Rechazo (Nivel 4)
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Supervisor y Motivos de Rechazo (Und y %)")
+        st.markdown("#### Supervisor y Motivos de Rechazo")
         col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else None)
         
-        if col_motivo and 'CRechazado' in df_rechazos.columns and 'CCreado' in df_filtered.columns:
-            from plotly.subplots import make_subplots
+        if col_motivo and 'CRechazado' in df_rechazos.columns:
+            # Tomar Top 5 Supervisores con más rechazos
+            df_sup_agg = df_rechazos.groupby(col_sup)['CRechazado'].sum().reset_index()
+            top_sups = df_sup_agg.sort_values('CRechazado', ascending=False).head(5)[col_sup].tolist()
             
-            # Calcular % del Total de Rechazos Global y tomar el Top 5
-            total_rechazos_global = df_rechazos['CRechazado'].sum()
-            df_sup_rech = df_rechazos.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
+            # Filtrar datos de rechazos solo para ese Top 5
+            df_sup_rech = df_rechazos[df_rechazos[col_sup].isin(top_sups)].copy()
+            df_sup_rech = df_sup_rech.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
+            df_sup_rech = df_sup_rech[df_sup_rech['CRechazado'] > 0]
             
-            df_sup_agg = df_sup_rech.groupby(col_sup)['CRechazado'].sum().reset_index()
-            df_sup_merged = df_sup_agg.sort_values('CRechazado', ascending=False).head(5).copy()
-            df_sup_merged['pct'] = (df_sup_merged['CRechazado'] / total_rechazos_global * 100) if total_rechazos_global > 0 else 0
-            
-            top_sups_order = df_sup_merged[col_sup].tolist()
-            df_sup_rech = df_sup_rech[df_sup_rech[col_sup].isin(top_sups_order)]
-            
-            # Crear subplots doble eje
-            fig_combo = make_subplots(specs=[[{"secondary_y": True}]])
-            
-            # Añadir barras apiladas por cada Motivo
-            motivos = df_sup_rech[col_motivo].unique()
-            color_idx = 0
-            for mot in motivos:
-                df_mot = df_sup_rech[df_sup_rech[col_motivo] == mot]
-                df_plot = df_mot.set_index(col_sup).reindex(top_sups_order).reset_index()
-                df_plot = df_plot.fillna(0)
-                
-                fig_combo.add_trace(
-                    go.Bar(
-                        x=df_plot[col_sup], 
-                        y=df_plot['CRechazado'], 
-                        name=str(mot)[:30] + ('...' if len(str(mot))>30 else ''),
-                        marker_color=THEME_COLORS[color_idx % len(THEME_COLORS)]
-                    ),
-                    secondary_y=False
-                )
-                color_idx += 1
-                
-            # Añadir línea de % total del supervisor
-            fig_combo.add_trace(
-                go.Scatter(
-                    x=df_sup_merged[col_sup],
-                    y=df_sup_merged['pct'],
-                    name='% Rechazo Supervisor',
-                    mode='lines+markers+text',
-                    text=df_sup_merged['pct'].apply(lambda x: f"{x:.1f}%"),
-                    textposition="top center",
-                    textfont=dict(color='#ff3366', size=11),
-                    line=dict(color='#ff3366', width=3),
-                    marker=dict(size=8, symbol='circle')
-                ),
-                secondary_y=True
+            # Graficar barras horizontales agrupadas para mayor claridad
+            fig_bar = px.bar(
+                df_sup_rech,
+                y=col_sup,
+                x='CRechazado',
+                color=col_motivo,
+                barmode='group',
+                orientation='h',
+                color_discrete_sequence=THEME_COLORS * 5,
+                text_auto='.0f'
             )
             
-            # Estilos
-            fig_combo.update_layout(
-                barmode='stack',
+            fig_bar.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#e2e8f0', size=10),
+                font=dict(color='#e2e8f0', size=11),
                 margin=dict(l=10, r=10, t=20, b=10),
                 legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
-                height=450
+                height=500
             )
+            fig_bar.update_yaxes(categoryorder='total ascending', title_text="")
+            fig_bar.update_xaxes(title_text="Total Rechazos (Und)")
             
-            fig_combo.update_yaxes(title_text="Total Rechazos (Und)", secondary_y=False)
-            max_pct = df_sup_merged['pct'].max()
-            fig_combo.update_yaxes(title_text="% Rechazo", secondary_y=True, showgrid=False, range=[0, max_pct * 1.3 if max_pct > 0 else 100])
-            
-            st.plotly_chart(fig_combo, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     # ── DATA TABLE ──
