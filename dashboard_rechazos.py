@@ -755,13 +755,13 @@ def main():
                 df_sup_rech = df_sup_rech.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
                 df_sup_rech = df_sup_rech[df_sup_rech['CRechazado'] > 0]
                 
-                # Graficar columnas agrupadas verticales
+                # Graficar columnas apiladas verticales
                 fig_bar = px.bar(
                     df_sup_rech,
                     x=col_sup,
                     y='CRechazado',
                     color=col_motivo,
-                    barmode='group',
+                    barmode='stack',
                     color_discrete_sequence=THEME_COLORS * 5,
                     text_auto='.0f'
                 )
