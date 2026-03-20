@@ -718,30 +718,19 @@ def main():
             df_sup_rech = df_sup_rech.groupby([col_sup, col_motivo])['CRechazado'].sum().reset_index()
             df_sup_rech = df_sup_rech[df_sup_rech['CRechazado'] > 0]
             
-            # Graficar barras horizontales agrupadas para mayor claridad
-            fig_bar = px.bar(
-                df_sup_rech,
-                y=col_sup,
-                x='CRechazado',
-                color=col_motivo,
-                barmode='group',
-                orientation='h',
-                color_discrete_sequence=THEME_COLORS * 5,
-                text_auto='.0f'
+            fig_tree = px.treemap(
+                df_sup_rech, 
+                path=[px.Constant("Supervisores"), col_sup, col_motivo], 
+                values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
             )
-            
-            fig_bar.update_layout(
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#e2e8f0', size=11),
-                margin=dict(l=10, r=10, t=20, b=10),
-                legend=dict(orientation="h", yanchor="bottom", y=-0.5, xanchor="center", x=0.5),
+            fig_tree.update_layout(
+                margin=dict(l=5, r=5, t=5, b=5), 
+                paper_bgcolor='rgba(0,0,0,0)', 
+                coloraxis_showscale=False,
                 height=500
             )
-            fig_bar.update_yaxes(categoryorder='total ascending', title_text="")
-            fig_bar.update_xaxes(title_text="Total Rechazos (Und)")
             
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_tree, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     # ── DATA TABLE ──
