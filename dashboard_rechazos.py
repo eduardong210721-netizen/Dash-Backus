@@ -142,10 +142,15 @@ def load_data():
     if 'Responsable' in df.columns:
         df['Responsable'] = df['Responsable'].fillna('Sin Responsable').astype(str)
         
-    # Standardize Motivos
-    if 'Motivos Rechazos' in df.columns and 'Motivo No Entregado' not in df.columns:
-        df['Motivo No Entregado'] = df['Motivos Rechazos'].fillna('Sin Motivo').astype(str)
+    # Ensure Motivos Rechazos is string
+    if 'Motivos Rechazos' in df.columns:
+        df['Motivos Rechazos'] = df['Motivos Rechazos'].fillna('Sin Motivo').astype(str)
         
+    # Remove 'Pedido No Rechazado' contamination from dimensions
+    for col in ['Ruta', 'Responsable', 'Empresario', 'Capacidad Camión', 'Distrito', 'Tipo de Rechazo']:
+        if col in df.columns:
+            df[col] = df[col].replace('Pedido No Rechazado', pd.NA)
+            
     return df
 
 # ─────────────────────── MAIN APP ───────────────────────
@@ -246,24 +251,21 @@ def main():
     # Peor BK
     ruta_critica = "N/A"
     ruta_critica_val = ""
-    if 'Ruta' in df.columns and 'CCreado' in df.columns and 'CRechazado' in df.columns and not df.empty:
-        df_rutas = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
-        df_rutas = df_rutas[df_rutas['CCreado'] > 0]
+    df_rechazos = df[df['CRechazado'] > 0]
+    if 'Ruta' in df_rechazos.columns and not df_rechazos.empty:
+        df_rutas = df_rechazos.groupby('Ruta').agg({'CRechazado': 'sum'})
         if not df_rutas.empty:
-            df_rutas['pct'] = df_rutas['CRechazado'] / df_rutas['CCreado'] * 100
-            ruta_critica = str(df_rutas['pct'].idxmax())
-            ruta_critica_val = f" ({df_rutas['pct'].max():.1f}%)"
+            ruta_critica = str(df_rutas['CRechazado'].idxmax())
+            ruta_critica_val = f" ({df_rutas['CRechazado'].max():.0f})"
             
     # Peor Empresario
     emp_corto = "N/A"
     emp_val = ""
-    if col_empresa and 'CCreado' in df.columns and 'CRechazado' in df.columns and not df.empty:
-        df_emp = df.groupby(col_empresa).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
-        df_emp = df_emp[df_emp['CCreado'] > 0]
+    if col_empresa and not df_rechazos.empty:
+        df_emp = df_rechazos.groupby(col_empresa).agg({'CRechazado': 'sum'})
         if not df_emp.empty:
-            df_emp['pct'] = df_emp['CRechazado'] / df_emp['CCreado'] * 100
-            emp_corto = str(df_emp['pct'].idxmax())
-            emp_val = f" ({df_emp['pct'].max():.1f}%)"
+            emp_corto = str(df_emp['CRechazado'].idxmax())
+            emp_val = f" ({df_emp['CRechazado'].max():.0f})"
 
     # ── KPI ROW ──
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -315,20 +317,22 @@ def main():
     
     with col_c1:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Top 10 BKs (% de Rechazo)")
-        if 'Ruta' in df.columns and 'CCreado' in df.columns and 'CRechazado' in df.columns:
-            df_ruta = df.groupby('Ruta').agg({'CCreado': 'sum', 'CRechazado': 'sum'})
-            df_ruta = df_ruta[df_ruta['CCreado'] > 0]
-            df_ruta['pct'] = df_ruta['CRechazado'] / df_ruta['CCreado'] * 100
-            df_ruta = df_ruta.reset_index().sort_values('pct', ascending=False).head(10)
+        st.markdown("#### Top 10 BKs (Total Rechazos)")
+        # Use df_rechazos to exclude 'Pedido No Rechazado' blank rows
+        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        
+        if 'Ruta' in df_rechazos.columns and 'CRechazado' in df_rechazos.columns:
+            df_ruta = df_rechazos.groupby('Ruta').agg({'CRechazado': 'sum'})
+            df_ruta = df_ruta[df_ruta['CRechazado'] > 0]
+            df_ruta = df_ruta.reset_index().sort_values('CRechazado', ascending=False).head(10)
             
             fig_ruta = px.bar(
                 df_ruta, 
-                x='Ruta', y='pct',
-                color='pct',
+                x='Ruta', y='CRechazado',
+                color='CRechazado',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
-                text_auto='.1f',
-                category_orders={'Ruta': df_ruta.sort_values('pct', ascending=False)['Ruta'].tolist()}
+                text_auto='.0f',
+                category_orders={'Ruta': df_ruta.sort_values('CRechazado', ascending=False)['Ruta'].tolist()}
             )
             fig_ruta.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -337,15 +341,22 @@ def main():
                 margin=dict(l=20, r=20, t=10, b=20),
                 coloraxis_showscale=False
             )
-            fig_ruta.update_yaxes(title_text="% Rechazado")
+            fig_ruta.update_yaxes(title_text="Total Pedidos Rechazados")
             st.plotly_chart(fig_ruta, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_c2:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.markdown("#### Top 5 Motivos de Rechazo")
-        if 'Motivo No Entregado' in df.columns and 'CRechazado' in df.columns:
-            df_motivo = df.groupby('Motivo No Entregado')['CRechazado'].sum().reset_index()
+        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        
+        col_motivo = 'Motivos Rechazos' if 'Motivos Rechazos' in df_rechazos.columns else ('Responsable' if 'Responsable' in df_rechazos.columns else None)
+        
+        if 'Motivos Rechazos' not in df_rechazos.columns:
+            st.warning("⚠️ Columna 'Motivos Rechazos' no encontrada. Mostrando por 'Responsable'.")
+            
+        if col_motivo and 'CRechazado' in df_rechazos.columns:
+            df_motivo = df_rechazos.groupby(col_motivo)['CRechazado'].sum().reset_index()
             total_ped = total_c_creado if total_c_creado > 0 else 1
             df_motivo['% del Total'] = (df_motivo['CRechazado'] / total_ped * 100).round(2)
             df_motivo = df_motivo.sort_values('CRechazado', ascending=False)
@@ -356,7 +367,7 @@ def main():
             
             fig_pie = px.pie(
                 df_top5, 
-                names='Motivo No Entregado', values='CRechazado', 
+                names=col_motivo, values='CRechazado', 
                 color_discrete_sequence=THEME_COLORS,
                 hole=0.45
             )
@@ -379,8 +390,8 @@ def main():
             # Rest as table
             if not df_rest.empty:
                 st.markdown("##### Otros Motivos")
-                df_rest_disp = df_rest[['Motivo No Entregado', 'CRechazado', '% del Total']].rename(
-                    columns={'Motivo No Entregado': 'Motivo', 'CRechazado': 'Rechazos'}
+                df_rest_disp = df_rest[[col_motivo, 'CRechazado', '% del Total']].rename(
+                    columns={col_motivo: 'Motivo', 'CRechazado': 'Rechazos'}
                 ).reset_index(drop=True)
                 st.dataframe(df_rest_disp, use_container_width=True, hide_index=True, height=150)
         st.markdown('</div>', unsafe_allow_html=True)
@@ -391,20 +402,21 @@ def main():
     with col_c3:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.markdown("#### Rechazo por Capacidad de Camión")
-        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df.columns else None
-        if col_cap and 'CCreado' in df.columns and 'CRechazado' in df.columns:
-            df_cap = df.groupby(col_cap).agg({'CCreado': 'sum', 'CRechazado': 'sum'})
-            df_cap = df_cap[df_cap['CCreado'] > 0]
-            df_cap['pct'] = df_cap['CRechazado'] / df_cap['CCreado'] * 100
-            df_cap = df_cap.reset_index().sort_values('pct', ascending=True)
+        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        
+        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
+        if col_cap and 'CRechazado' in df_rechazos.columns:
+            df_cap = df_rechazos.groupby(col_cap).agg({'CRechazado': 'sum'})
+            df_cap = df_cap[df_cap['CRechazado'] > 0]
+            df_cap = df_cap.reset_index().sort_values('CRechazado', ascending=True)
                 
             fig_cap = px.bar(
                 df_cap, 
-                y=col_cap, x='pct',
+                y=col_cap, x='CRechazado',
                 orientation='h',
-                color='pct',
+                color='CRechazado',
                 color_continuous_scale=[c[1] for c in DIVERGENT_COLORS],
-                text_auto='.1f'
+                text_auto='.0f'
             )
             fig_cap.update_layout(
                 plot_bgcolor='rgba(0,0,0,0)', 
@@ -413,16 +425,18 @@ def main():
                 margin=dict(l=20, r=20, t=10, b=20),
                 coloraxis_showscale=False
             )
-            fig_cap.update_xaxes(title_text="% Rechazado")
+            fig_cap.update_xaxes(title_text="Total Pedidos Rechazados")
             fig_cap.update_yaxes(type='category')
             st.plotly_chart(fig_cap, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     with col_c4:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        if col_empresa and 'Ruta' in df.columns and 'CRechazado' in df.columns:
+        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        
+        if col_empresa and 'Ruta' in df_rechazos.columns and 'CRechazado' in df_rechazos.columns:
             st.markdown(f"#### Relación {col_empresa} y BK")
-            df_resp = df.groupby([col_empresa, 'Ruta'])['CRechazado'].sum().reset_index()
+            df_resp = df_rechazos.groupby([col_empresa, 'Ruta'])['CRechazado'].sum().reset_index()
             df_resp = df_resp[df_resp['CRechazado'] > 0]
             fig_tree = px.treemap(
                 df_resp, 
@@ -442,11 +456,13 @@ def main():
     if col_empresa:
         st.markdown("### 🏢 Análisis Resumen de Empresa de Transporte")
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Tipo de Rechazo por Empresario (Total Despachado vs Fallido)")
-        col_tr = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df.columns else ('Motivo No Entregado' if 'Motivo No Entregado' in df.columns else None)
-        if col_tr and 'CRechazado' in df.columns:
+        st.markdown("#### Tipo de Rechazo por Empresario")
+        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        
+        col_tr = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else ('Motivos Rechazos' if 'Motivos Rechazos' in df_rechazos.columns else None)
+        if col_tr and 'CRechazado' in df_rechazos.columns:
             pivot_emp = pd.pivot_table(
-                df, 
+                df_rechazos, 
                 values='CRechazado', 
                 index=col_empresa, 
                 columns=col_tr, 
