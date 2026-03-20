@@ -646,55 +646,42 @@ def main():
         col_cap_c = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
         if col_cap_c:
             df_sup_cap = df_rechazos.groupby([col_sup, col_cap_c])['CRechazado'].sum().reset_index()
-            # Top 10 para evitar saturación
-            top_sups = df_sup_cap.groupby(col_sup)['CRechazado'].sum().nlargest(10).index
-            df_sup_cap = df_sup_cap[df_sup_cap[col_sup].isin(top_sups)]
             df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
             
-            fig_s2 = px.bar(
+            fig_s2 = px.treemap(
                 df_sup_cap, 
-                y=col_sup, x='CRechazado', color=col_cap_c, 
-                orientation='h', color_discrete_sequence=THEME_COLORS*5
+                path=[px.Constant("Supervisores"), col_sup, col_cap_c], 
+                values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
             )
-            fig_s2.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10), 
-                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                font=dict(color='#e2e8f0', size=11), barmode='stack',
-                legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
-            )
-            fig_s2.update_yaxes(title_text="", categoryorder='total ascending')
-            fig_s2.update_xaxes(title_text="Total Rechazos")
+            fig_s2.update_layout(margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
             st.plotly_chart(fig_s2, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 2. Tablas Resumen: BK y Empresario
-        col_t1, col_t2 = st.columns(2)
+        # 2. Tabla Resumen: BK (Nivel 2)
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.markdown("#### Tabla: Supervisor vs BK (Ruta)")
+        if 'Ruta' in df_rechazos.columns:
+            pivot_bk = pd.pivot_table(
+                df_rechazos, values='CRechazado', index=col_sup, columns='Ruta', 
+                aggfunc='sum', fill_value=0, margins=True, margins_name='TOTAL'
+            )
+            if 'TOTAL' in pivot_bk.index:
+                pivot_bk = pivot_bk.sort_values('TOTAL', ascending=False)
+            st.dataframe(pivot_bk.style.format("{:.0f}"), use_container_width=True, height=400)
+        st.markdown('</div>', unsafe_allow_html=True)
         
-        with col_t1:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### Tabla: Supervisor vs BK (Ruta)")
-            if 'Ruta' in df_rechazos.columns:
-                pivot_bk = pd.pivot_table(
-                    df_rechazos, values='CRechazado', index=col_sup, columns='Ruta', 
-                    aggfunc='sum', fill_value=0, margins=True, margins_name='TOTAL'
-                )
-                if 'TOTAL' in pivot_bk.index:
-                    pivot_bk = pivot_bk.sort_values('TOTAL', ascending=False)
-                st.dataframe(pivot_bk.style.format("{:.0f}"), use_container_width=True, height=400)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-        with col_t2:
-            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### Tabla: Supervisor vs Empresario")
-            if col_empresa:
-                pivot_s3 = pd.pivot_table(
-                    df_rechazos, values='CRechazado', index=col_sup, columns=col_empresa, 
-                    aggfunc='sum', fill_value=0, margins=True, margins_name='TOTAL'
-                )
-                if 'TOTAL' in pivot_s3.index:
-                    pivot_s3 = pivot_s3.sort_values('TOTAL', ascending=False)
-                st.dataframe(pivot_s3.style.format("{:.0f}"), use_container_width=True, height=400)
-            st.markdown('</div>', unsafe_allow_html=True)    # ── DATA TABLE ──
+        # 3. Tabla Resumen: Empresario (Nivel 3)
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.markdown("#### Tabla: Supervisor vs Empresario")
+        if col_empresa:
+            pivot_s3 = pd.pivot_table(
+                df_rechazos, values='CRechazado', index=col_sup, columns=col_empresa, 
+                aggfunc='sum', fill_value=0, margins=True, margins_name='TOTAL'
+            )
+            if 'TOTAL' in pivot_s3.index:
+                pivot_s3 = pivot_s3.sort_values('TOTAL', ascending=False)
+            st.dataframe(pivot_s3.style.format("{:.0f}"), use_container_width=True, height=400)
+        st.markdown('</div>', unsafe_allow_html=True)    # ── DATA TABLE ──
     st.markdown("### 📋 Detalle de Rechazos")
     st.dataframe(
         df.head(200), 
