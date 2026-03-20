@@ -180,6 +180,7 @@ def main():
     col_empresa = next((c for c in df.columns if 'EMPRESA' in c.upper()), None)
     col_ruta = 'Ruta' if 'Ruta' in df.columns else None
     col_responsable = 'Responsable' if 'Responsable' in df.columns else None
+    col_sup = next((c for c in df.columns if c.upper() in ['SUPERVISOR', 'SUPERVISION']), None)
     
     df_filtered = df.copy()
     
