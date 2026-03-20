@@ -142,9 +142,9 @@ def load_data():
     if 'Responsable' in df.columns:
         df['Responsable'] = df['Responsable'].fillna('Sin Responsable').astype(str)
         
-    # Ensure Motivos Rechazos is string
-    if 'Motivos Rechazos' in df.columns:
-        df['Motivos Rechazos'] = df['Motivos Rechazos'].fillna('Sin Motivo').astype(str)
+    # Ensure Motivo Rechazo is string
+    if 'Motivo Rechazo' in df.columns:
+        df['Motivo Rechazo'] = df['Motivo Rechazo'].fillna('Sin Motivo').astype(str)
         
     # Remove 'Pedido No Rechazado' contamination from dimensions
     for col in ['Ruta', 'Responsable', 'Empresario', 'Capacidad Camión', 'Distrito', 'Tipo de Rechazo']:
@@ -350,10 +350,10 @@ def main():
         st.markdown("#### Top 5 Motivos de Rechazo")
         df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
         
-        col_motivo = 'Motivos Rechazos' if 'Motivos Rechazos' in df_rechazos.columns else ('Responsable' if 'Responsable' in df_rechazos.columns else None)
+        col_motivo = 'Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else ('Responsable' if 'Responsable' in df_rechazos.columns else None)
         
-        if 'Motivos Rechazos' not in df_rechazos.columns:
-            st.warning("⚠️ Columna 'Motivos Rechazos' no encontrada. Mostrando por 'Responsable'.")
+        if 'Motivo Rechazo' not in df_rechazos.columns:
+            st.warning("⚠️ Columna 'Motivo Rechazo' no encontrada. Mostrando por 'Responsable'.")
             
         if col_motivo and 'CRechazado' in df_rechazos.columns:
             df_motivo = df_rechazos.groupby(col_motivo)['CRechazado'].sum().reset_index()
@@ -459,7 +459,7 @@ def main():
         st.markdown("#### Tipo de Rechazo por Empresario")
         df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
         
-        col_tr = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else ('Motivos Rechazos' if 'Motivos Rechazos' in df_rechazos.columns else None)
+        col_tr = 'Tipo de Rechazo' if 'Tipo de Rechazo' in df_rechazos.columns else ('Motivo Rechazo' if 'Motivo Rechazo' in df_rechazos.columns else None)
         if col_tr and 'CRechazado' in df_rechazos.columns:
             pivot_emp = pd.pivot_table(
                 df_rechazos, 
