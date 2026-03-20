@@ -442,16 +442,30 @@ def main():
         st.markdown('</div>', unsafe_allow_html=True)
         
     
-    col_c3, col_c4 = st.columns([1, 1])
+    col_c3, col_c4 = st.columns([3, 1])
     
+    with col_c4:
+        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+        st.markdown("#### Filtro Empresario")
+        df_rechazos_base = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        if col_empresa and not df_rechazos_base.empty:
+            empresas_list = ["Todos"] + sorted(df_rechazos_base[col_empresa].dropna().astype(str).unique())
+            selected_empresa = st.radio("Seleccione Empresario:", options=empresas_list, key='radio_emp')
+        else:
+            selected_empresa = "Todos"
+        st.markdown('</div>', unsafe_allow_html=True)
+
     with col_c3:
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.markdown("#### Rechazo por Capacidad de Camión")
-        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
+        df_rechazos_cap = df_filtered[df_filtered['CRechazado'] > 0].copy()
         
-        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
-        if col_cap and 'CRechazado' in df_rechazos.columns:
-            df_cap = df_rechazos.groupby(col_cap).agg({'CRechazado': 'sum'})
+        if selected_empresa != "Todos" and col_empresa:
+            df_rechazos_cap = df_rechazos_cap[df_rechazos_cap[col_empresa] == selected_empresa]
+        
+        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos_cap.columns else None
+        if col_cap and 'CRechazado' in df_rechazos_cap.columns:
+            df_cap = df_rechazos_cap.groupby(col_cap).agg({'CRechazado': 'sum'})
             df_cap = df_cap[df_cap['CRechazado'] > 0]
             df_cap = df_cap.reset_index().sort_values('CRechazado', ascending=True)
                 
@@ -471,31 +485,8 @@ def main():
                 coloraxis_showscale=False
             )
             fig_cap.update_xaxes(title_text="Total Pedidos Rechazados")
-            fig_cap.update_yaxes(type='category')
+            fig_cap.update_yaxes(type='category', title_text="")
             st.plotly_chart(fig_cap, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col_c4:
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        df_rechazos = df_filtered[df_filtered['CRechazado'] > 0].copy()
-        
-        col_cap = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
-        if col_empresa and col_cap and 'CRechazado' in df_rechazos.columns:
-            st.markdown(f"#### Relación Empresario y Capacidad de Camión")
-            df_resp = df_rechazos.groupby([col_empresa, col_cap])['CRechazado'].sum().reset_index()
-            df_resp = df_resp[df_resp['CRechazado'] > 0]
-            fig_tree = px.treemap(
-                df_resp, 
-                path=[px.Constant("Empresas"), col_empresa, col_cap], 
-                values='CRechazado',
-                color='CRechazado',
-                color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
-            )
-            fig_tree.update_layout(
-                margin=dict(l=10, r=10, t=10, b=10),
-                paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig_tree, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
     # ── EMPRESARIO DEEP DIVE ──
@@ -661,21 +652,50 @@ def main():
         st.markdown("### 📊 Análisis Detallado por Supervisor")
         
         # 1. Gráfico Ancho: Supervisor vs Capacidad
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### Supervisor vs Capacidad de Camión")
-        col_cap_c = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
-        if col_cap_c:
-            df_sup_cap = df_rechazos.groupby([col_sup, col_cap_c])['CRechazado'].sum().reset_index()
-            df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
+        col_s1, col_s2 = st.columns([3, 1])
+        
+        with col_s2:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### Filtro Supervisor")
+            df_sup_base = df_rechazos.copy()
+            if col_sup and not df_sup_base.empty:
+                sups_list = ["Top 3"] + sorted(df_sup_base[col_sup].dropna().astype(str).unique())
+                selected_sup = st.radio("Seleccione Supervisor:", options=sups_list, key='radio_sup')
+            else:
+                selected_sup = "Top 3"
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            fig_s2 = px.treemap(
-                df_sup_cap, 
-                path=[px.Constant("Supervisores"), col_sup, col_cap_c], 
-                values='CRechazado', color='CRechazado', color_continuous_scale=[c[1] for c in DIVERGENT_COLORS]
-            )
-            fig_s2.update_layout(margin=dict(l=5, r=5, t=5, b=5), paper_bgcolor='rgba(0,0,0,0)', coloraxis_showscale=False)
-            st.plotly_chart(fig_s2, use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        with col_s1:
+            st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+            st.markdown("#### Supervisor vs Capacidad de Camión")
+            col_cap_c = 'Capacidad Camión' if 'Capacidad Camión' in df_rechazos.columns else None
+            if col_cap_c:
+                df_sup_cap = df_rechazos.groupby([col_sup, col_cap_c])['CRechazado'].sum().reset_index()
+                df_sup_cap = df_sup_cap[df_sup_cap['CRechazado'] > 0]
+                
+                if selected_sup == "Top 3":
+                    top_sups = df_sup_cap.groupby(col_sup)['CRechazado'].sum().nlargest(3).index
+                    df_sup_cap = df_sup_cap[df_sup_cap[col_sup].isin(top_sups)]
+                else:
+                    df_sup_cap = df_sup_cap[df_sup_cap[col_sup] == selected_sup]
+                
+                # Columnas agrupadas: x=Capacidad, y=Rechazos
+                fig_s2 = px.bar(
+                    df_sup_cap, 
+                    x=col_cap_c, y='CRechazado', color=col_sup, 
+                    barmode='group', color_discrete_sequence=THEME_COLORS*5,
+                    text_auto='.0f'
+                )
+                fig_s2.update_layout(
+                    margin=dict(l=10, r=10, t=20, b=10), 
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font=dict(color='#e2e8f0', size=11),
+                    legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5)
+                )
+                fig_s2.update_yaxes(title_text="Total Rechazos")
+                fig_s2.update_xaxes(title_text="Capacidad Camión", type='category')
+                st.plotly_chart(fig_s2, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
 
         # 2. Tabla Resumen: BK (Nivel 2)
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
