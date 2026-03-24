@@ -259,6 +259,7 @@ def main():
     total_rech_parcial = df['CRechazadoParcial'].sum() if 'CRechazadoParcial' in df.columns else 0
     total_rech_total = df['CRechazadoTotal'].sum() if 'CRechazadoTotal' in df.columns else 0
     
+    pct_rechazo_global = (total_c_rechazado / pedidos_efectivos * 100) if pedidos_efectivos > 0 else 0
     pct_rechazo_parcial = (total_rech_parcial / pedidos_efectivos * 100) if pedidos_efectivos > 0 else 0
     pct_rechazo_total = (total_rech_total / pedidos_efectivos * 100) if pedidos_efectivos > 0 else 0
     
@@ -272,15 +273,6 @@ def main():
             ruta_critica = str(df_rutas['CRechazado'].idxmax())
             ruta_critica_val = f" ({df_rutas['CRechazado'].max():.0f})"
             
-    # Peor Empresario
-    emp_corto = "N/A"
-    emp_val = ""
-    if col_empresa and not df_rechazos.empty:
-        df_emp = df_rechazos.groupby(col_empresa).agg({'CRechazado': 'sum'})
-        if not df_emp.empty:
-            emp_corto = str(df_emp['CRechazado'].idxmax())
-            emp_val = f" ({df_emp['CRechazado'].max():.0f})"
-
     # Top Motivo
     top_motivo = "N/A"
     top_motivo_val = ""
@@ -294,7 +286,7 @@ def main():
             top_motivo_val = f" ({df_mot['CRechazado'].max():.0f})"
 
     # ── KPI ROW ──
-    col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     with col1:
         st.markdown(f'''
@@ -308,23 +300,26 @@ def main():
         st.markdown(f'''
         <div class="kpi-card">
             <div class="kpi-value" style="color: {KPI_COLORS['Negativo']}">{total_c_rechazado:,.0f}</div>
-            <div class="kpi-label">Pedidos Rechazados</div>
+            <div style="font-size: 1.1em; color: {KPI_COLORS['Negativo']}; margin-top: -5px; font-weight: 600;">{pct_rechazo_global:.1f}%</div>
+            <div class="kpi-label" style="margin-top: 5px;">Pedidos Rechazados</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col3:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: #FF9800">{pct_rechazo_parcial:.1f}%</div>
-            <div class="kpi-label">% Rechazo Parcial</div>
+            <div class="kpi-value" style="color: #FF9800">{total_rech_parcial:,.0f}</div>
+            <div style="font-size: 1.1em; color: #FF9800; margin-top: -5px; font-weight: 600;">{pct_rechazo_parcial:.1f}%</div>
+            <div class="kpi-label" style="margin-top: 5px;">Rechazo Parcial</div>
         </div>
         ''', unsafe_allow_html=True)
         
     with col4:
         st.markdown(f'''
         <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{pct_rechazo_total:.1f}%</div>
-            <div class="kpi-label">% Rechazo Total</div>
+            <div class="kpi-value" style="color: {THEME_COLORS[0]}">{total_rech_total:,.0f}</div>
+            <div style="font-size: 1.1em; color: {THEME_COLORS[0]}; margin-top: -5px; font-weight: 600;">{pct_rechazo_total:.1f}%</div>
+            <div class="kpi-label" style="margin-top: 5px;">Rechazo Total</div>
         </div>
         ''', unsafe_allow_html=True)
         
@@ -341,14 +336,6 @@ def main():
         <div class="kpi-card">
             <div class="kpi-value" style="color: {THEME_COLORS[2]}; font-size: 1.05rem; margin-top: 8px;">{ruta_critica}{ruta_critica_val}</div>
             <div class="kpi-label">BK Más Crítico</div>
-        </div>
-        ''', unsafe_allow_html=True)
-        
-    with col7:
-        st.markdown(f'''
-        <div class="kpi-card">
-            <div class="kpi-value" style="color: {THEME_COLORS[3]}; font-size: 1.05rem; margin-top: 8px;">{emp_corto}{emp_val}</div>
-            <div class="kpi-label">Peor Empresa</div>
         </div>
         ''', unsafe_allow_html=True)
 
