@@ -407,30 +407,64 @@ st.markdown(
 map_data = st_folium(m, use_container_width=True, height=560)
 
 # ──────────────────────────────────────────────────────────────
-# Filter by drawn shape
+# Filter by drawn shape or clicked location
 # ──────────────────────────────────────────────────────────────
+import math
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371000 # radius of Earth in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
 df_display = df_sidebar.copy()
 shape_active = False
 
-if map_data and map_data.get("all_drawings"):
-    drawings = map_data["all_drawings"]
+if map_data:
+    drawings = map_data.get("all_drawings", [])
     if drawings:
-        # Combine all drawn shapes into a single filter
         selected_indices = set()
         for drawing in drawings:
             geom = drawing.get("geometry")
+            props = drawing.get("properties", {})
             if geom:
                 try:
-                    drawn_shape = shape(geom)
-                    for idx, row in df_sidebar.iterrows():
-                        pt = Point(row["Longitud"], row["Latitud"])
-                        if drawn_shape.contains(pt):
-                            selected_indices.add(idx)
+                    if geom.get("type") == "Point" and "radius" in props:
+                        # Circle drawn
+                        center_lon, center_lat = geom["coordinates"]
+                        radius = props["radius"]
+                        for idx, row in df_sidebar.iterrows():
+                            dist = haversine(center_lat, center_lon, float(row["Latitud"]), float(row["Longitud"]))
+                            if dist <= radius:
+                                selected_indices.add(idx)
+                    else:
+                        # Polygon or Rectangle drawn
+                        drawn_shape = shape(geom)
+                        for idx, row in df_sidebar.iterrows():
+                            pt = Point(float(row["Longitud"]), float(row["Latitud"]))
+                            if drawn_shape.contains(pt):
+                                selected_indices.add(idx)
                 except Exception:
                     pass
         if selected_indices:
             df_display = df_sidebar.loc[list(selected_indices)]
             shape_active = True
+
+    # Check for click on specific marker if no drawings restrict view
+    if not shape_active:
+        clicked = map_data.get("last_object_clicked")
+        if clicked and "lat" in clicked and "lng" in clicked:
+            lat = clicked["lat"]
+            lng = clicked["lng"]
+            tol = 1e-4
+            mask_click = (abs(df_sidebar["Latitud"] - lat) < tol) & (abs(df_sidebar["Longitud"] - lng) < tol)
+            if mask_click.any():
+                df_display = df_sidebar[mask_click]
+                shape_active = True
 
 # ──────────────────────────────────────────────────────────────
 # Legend (supervisor colours)
