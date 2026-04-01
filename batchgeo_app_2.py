@@ -300,6 +300,10 @@ if df_filtered.empty:
     st.warning("⚠️ No hay datos para los filtros seleccionados.")
     st.stop()
 
+# Assign a unique row ID for map selection mapping
+df_filtered = df_filtered.copy()
+df_filtered["_row_id"] = range(len(df_filtered))
+
 # Build colour map (ensure stability across filters)
 unique_sups_all = sorted(df["Supervisor"].dropna().unique())
 color_map = {s: COLOUR_SEQ[i % len(COLOUR_SEQ)] for i, s in enumerate(unique_sups_all)}
@@ -322,6 +326,7 @@ fig = px.scatter_mapbox(
     color="Supervisor",
     color_discrete_map=color_map,
     hover_name="Nombre",
+    custom_data=["_row_id"],
     hover_data={
         "Cantidad": True,
         "ZV": True,
@@ -379,11 +384,15 @@ event = st.plotly_chart(
 df_display = df_filtered.copy()
 selection_active = False
 
-if event and event.selection and event.selection.get("point_indices"):
-    selected_idx = event.selection["point_indices"]
-    if selected_idx:
-        df_display = df_filtered.iloc[selected_idx]
-        selection_active = True
+if event and hasattr(event, "selection"):
+    # Extract points from the selection
+    points = event.selection.get("points", [])
+    if points:
+        # custom_data=["_row_id"] places _row_id at index 0 of customdata
+        selected_row_ids = [pt["customdata"][0] for pt in points if "customdata" in pt]
+        if selected_row_ids:
+            df_display = df_filtered[df_filtered["_row_id"].isin(selected_row_ids)]
+            selection_active = True
 
 # ──────────────────────────────────────────────────────────────
 # Metrics
