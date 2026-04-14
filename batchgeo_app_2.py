@@ -453,7 +453,7 @@ def build_map(
             yanchor="top", y=0.97,
             xanchor="left", x=0.01,
         ),
-        dragmode="lasso",
+        dragmode="pan",
         font=dict(family="DM Sans"),
         uirevision="geo_map",   # preserves zoom/pan on filter reruns
         coloraxis_showscale=bool(color_by and df[color_by].dtype.kind in ("i","f")),
