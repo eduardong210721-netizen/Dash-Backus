@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from io import BytesIO
+import os
+import uuid
 
 # ──────────────────────────────────────────────────────────────
 # Page config
@@ -249,13 +251,32 @@ if uploaded is None:
         pd.DataFrame(_HEADER_EXAMPLES, columns=["Encabezado aceptado", "Descripción", "Ejemplo"]),
         use_container_width=True, hide_index=True,
     )
-    st.stop()
+    if "share_id" not in st.query_params:
+        st.stop()
 
 # ──────────────────────────────────────────────────────────────
-# Read & normalise
+# Read & normalise (from upload or shared link)
 # ──────────────────────────────────────────────────────────────
-df_raw = pd.read_excel(uploaded)
-df = _normalise(df_raw)
+SHARE_DIR = ".shared_data"
+os.makedirs(SHARE_DIR, exist_ok=True)
+
+df_raw = None
+
+if uploaded is not None:
+    df_raw = pd.read_excel(uploaded)
+elif "share_id" in st.query_params:
+    share_path = os.path.join(SHARE_DIR, f"{st.query_params['share_id']}.parquet")
+    if os.path.exists(share_path):
+        st.sidebar.success("✅ Datos cargados desde el enlace compartido.")
+        df_raw = pd.read_parquet(share_path)
+    else:
+        st.error("❌ El enlace de compartición es inválido o los datos han expirado.")
+        st.stop()
+
+if df_raw is None:
+    st.stop()
+
+df = _normalise(df_raw.copy())
 if df is None:
     st.stop()
 
@@ -272,6 +293,15 @@ if dropped:
 # Sidebar filters
 # ──────────────────────────────────────────────────────────────
 st.sidebar.markdown("## 🔎 Filtros")
+
+# Share Button Logic
+with st.sidebar.expander("🔗 Compartir Resultados"):
+    st.markdown("<p style='font-size:0.85rem;'>Genera un panel para enviar a otra persona sin pasarle el Excel.</p>", unsafe_allow_html=True)
+    if st.button("🔗 Generar Enlace de Visualización", use_container_width=True):
+        new_id = str(uuid.uuid4())[:8]
+        save_path = os.path.join(SHARE_DIR, f"{new_id}.parquet")
+        df_raw.to_parquet(save_path, index=False)
+        st.success(f"¡Enlace creado! Cópialo o añádelo a tu web: `/?share_id={new_id}`")
 
 # 1. Text filter for code (Solic)
 search_solic = st.sidebar.text_input(
@@ -378,6 +408,16 @@ event = st.plotly_chart(
     selection_mode=["points", "lasso", "box"],
 )
 
+# Export Map Interactive button
+map_html = fig.to_html(include_plotlyjs="cdn", full_html=True)
+st.download_button(
+    label="⬇️ Exportar mapa interactivo (HTML)",
+    data=map_html,
+    file_name="mapa_interactivo.html",
+    mime="text/html",
+    help="Descarga un archivo web con el mapa en pantalla completa para que lo compartas y abran sin internet/app.",
+)
+
 # ──────────────────────────────────────────────────────────────
 # Process selection
 # ──────────────────────────────────────────────────────────────
@@ -424,20 +464,25 @@ else:
     st.caption(f"Mostrando {len(df_display)} clientes (usa lasso/box en el mapa para seleccionar).")
 
 # Download button
+core_cols = ["Solic", "Nombre", "Supervisor", "ZV", "Cantidad", "Latitud", "Longitud"]
+extra_cols = [c for c in df_display.columns if c not in core_cols and c != "_row_id"]
+ordered_cols = core_cols + extra_cols
+
 df_export = (
-    df_display[["Solic", "Nombre", "Supervisor", "ZV", "Cantidad", "Latitud", "Longitud"]]
+    df_display[ordered_cols]
     .sort_values("Cantidad", ascending=False)
     .reset_index(drop=True)
 )
+
 buffer = BytesIO()
 with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
     df_export.to_excel(writer, index=False, sheet_name="Clientes")
 buffer.seek(0)
 
 st.download_button(
-    label="⬇️ Descargar tabla en Excel",
+    label="⬇️ Descargar tabla con todas las columnas (.xlsx)",
     data=buffer,
-    file_name="clientes_filtrados.xlsx",
+    file_name="clientes_completos.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 )
 
