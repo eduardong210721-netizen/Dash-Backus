@@ -55,9 +55,9 @@ COLOUR_SEQ = [
 ]
 
 MAP_STYLES = {
+    "🗺️  OpenStreetMap"       : "open-street-map",
     "☀️  Claro (Carto)"       : "carto-positron",
     "🌙  Oscuro (Carto)"      : "carto-darkmatter",
-    "🗺️  OpenStreetMap"       : "open-street-map",
     "⬜  Fondo blanco"         : "white-bg",
 }
 
