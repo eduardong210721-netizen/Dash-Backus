@@ -578,10 +578,17 @@ if uploaded is not None:
         st.stop()
 
 elif "share_id" in st.query_params:
-    share_path = os.path.join(SHARE_DIR, f"{st.query_params['share_id']}.parquet")
-    if os.path.exists(share_path):
+    sid = st.query_params['share_id']
+    # Soporte para CSV (nuevo formato seguro) y Parquet (formato heredado)
+    share_path_csv = os.path.join(SHARE_DIR, f"{sid}.csv")
+    share_path_pq = os.path.join(SHARE_DIR, f"{sid}.parquet")
+    
+    if os.path.exists(share_path_csv):
         st.sidebar.success("✅ Datos cargados desde enlace compartido.")
-        df_raw = pd.read_parquet(share_path)
+        df_raw = pd.read_csv(share_path_csv)
+    elif os.path.exists(share_path_pq):
+        st.sidebar.success("✅ Datos cargados desde enlace compartido.")
+        df_raw = pd.read_parquet(share_path_pq)
     else:
         st.error("❌ Enlace inválido o datos expirados (máx. 7 días).")
         st.stop()
@@ -777,7 +784,8 @@ with st.sidebar.expander("🔗 Compartir mapa"):
                 unsafe_allow_html=True)
     if st.button("⚡ Generar enlace de compartición", use_container_width=True):
         sid = str(uuid.uuid4())[:8]
-        df_raw.to_parquet(os.path.join(SHARE_DIR, f"{sid}.parquet"), index=False)
+        # Guardar en CSV soluciona el problema de tipos mixtos (ArrowInvalid)
+        df_raw.to_csv(os.path.join(SHARE_DIR, f"{sid}.csv"), index=False)
         st.code(f"?share_id={sid}")
         st.caption("Añade este parámetro a la URL de tu app (ej: https://tu-app.streamlit.app/?share_id=" + sid + ")")
 
